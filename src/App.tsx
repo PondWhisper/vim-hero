@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
-import { vim } from '@replit/codemirror-vim';
+import { vim, getCM } from '@replit/codemirror-vim';
 import { highlightActiveLine, highlightActiveLineGutter, Decoration, WidgetType, drawSelection } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
 import { StateField, StateEffect } from '@codemirror/state';
@@ -309,6 +309,8 @@ export default function App() {
   const [toast, setToast]         = useState<string | null>(null);
   const [success, setSuccess]     = useState(false);
   const [entropy, setEntropy]     = useState(0); // keystroke counter → blur penalty
+  // editorView: set in onCreateEditor, triggers the vim-mode-change useEffect
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   // ── Refs (avoid stale closures in stable callbacks) ───────────────────────
   const levelIdxRef      = useRef(0);
@@ -400,21 +402,16 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // all state via refs — intentionally stable
 
-  // ── onUpdate: mode detection via cm-fat-cursor DOM class ─────────────────
-  // Wrapped in useCallback with empty deps: all state is read through refs,
-  // so the function reference is stable across React re-renders. This prevents
-  // uiw/react-codemirror from re-registering the listener on every render
-  // which can cause cursor position jitter via spurious update cycles.
+  // Stable ref to commitModeChange — allows the stable handleCreateEditor
+  // callback (useCallback []) to always invoke the latest version without
+  // stale-closure issues.
+  const commitModeChangeRef = useRef(commitModeChange);
+  commitModeChangeRef.current = commitModeChange;
+
+  // ── onUpdate: tracks cursor position + triggers validation ───────────────
+  // Mode detection is now handled via cm.on("vim-mode-change") in
+  // handleCreateEditor — no DOM class heuristics needed here.
   const handleUpdate = useCallback((update: any) => {
-    const editorEl = update.view.dom as HTMLElement;
-    const detected: VimMode = editorEl.classList.contains('cm-fat-cursor')
-      ? 'normal'
-      : 'insert';
-
-    if (detected !== vimModeRef.current) {
-      commitModeChange(detected);
-    }
-
     if (!update.docChanged && !update.selectionSet) return;
     const sel  = update.state.selection.main;
     const doc  = update.state.doc;
@@ -431,7 +428,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // all state accessed through refs — empty dep array is intentional
 
-  // ── onCreateEditor: set ghost cursor + sync initial snap ─────────────
+  // ── onCreateEditor: ghost cursor + initial snap + store view for useEffect ─
   const handleCreateEditor = useCallback((view: EditorView) => {
     const doc = view.state.doc;
     const ns: EditorSnapshot = {
@@ -446,8 +443,16 @@ export default function App() {
     Promise.resolve().then(() =>
       view.dispatch({ effects: setGhostTarget.of(target) })
     );
+
+    // Trigger the vim-mode-change useEffect by storing the fresh view.
+    // We must NOT call getCM(view).on(...) here because this runs inside
+    // @uiw/react-codemirror's useLayoutEffect, and React StrictMode's
+    // double-invoke can silently drop the listener.  The dedicated
+    // useEffect([editorView, levelIdx]) below is the single reliable place
+    // to bind and clean up the CM5 event listener.
+    setEditorView(view);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // all state accessed through refs — empty dep array is intentional
+  }, []); // all state via refs — intentionally stable
 
   // ── Level change reset ────────────────────────────────────────────────────
   useEffect(() => {
@@ -459,15 +464,46 @@ export default function App() {
     modeHistoryRef.current = []; // clear sequence tracker for the new level
   }, [levelIdx]);
 
+  // ── Bullet-proof vim-mode-change listener ─────────────────────────────────
+  // Runs AFTER paint (useEffect, not useLayoutEffect) so the CM5 adapter is
+  // fully initialised.  React guarantees cleanup fires before the next run,
+  // which is what correctly removes the stale listener when the editor is
+  // remounted on level change (key={levelIdx}).
+  //
+  // Why not in onCreateEditor?  @uiw/react-codemirror calls onCreateEditor
+  // inside its own useLayoutEffect([container, state]).  React StrictMode
+  // double-invokes layout effects; the cleanup resets `state` to undefined
+  // but does NOT immediately destroy the view — the result is a silently
+  // orphaned listener that never fires.  Moving the binding here is the fix.
+  useEffect(() => {
+    if (!editorView) return;
+    const cm = getCM(editorView);
+    if (!cm) return;
+
+    const VALID_MODES: VimMode[] = ['normal', 'insert', 'visual', 'replace'];
+    const handler = (e: { mode: string; subMode?: string }) => {
+      const next: VimMode = VALID_MODES.includes(e.mode as VimMode)
+        ? (e.mode as VimMode)
+        : 'normal';
+      commitModeChangeRef.current(next);
+    };
+
+    cm.on('vim-mode-change', handler);
+    return () => { cm.off('vim-mode-change', handler); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorView, levelIdx]); // re-bind whenever editor is recreated or level changes
+
   // ── Unified keydown: entropy counting + level-specific handler ────────────
   // All non-modifier keypresses increment entropy. Arrow keys carry a +20 penalty
-  // (relevant for L7) to discourage directional navigation. After counting,
-  // the current level's onKeyDown is called (if defined) for level-specific logic.
+  // (relevant for L7) to discourage directional navigation.
+  // Mode detection is now handled by the vim-mode-change event listener set up
+  // in handleCreateEditor — no rAF heuristics needed here.
   useEffect(() => {
     const el = wrapperRef.current;
     if (!el) return;
     const handler = (e: KeyboardEvent) => {
       if (['Control','Alt','Shift','Meta','CapsLock','Tab'].includes(e.key)) return;
+
       const isArrow = ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key);
       entropyRef.current += isArrow ? 20 : 1;
       setEntropy(entropyRef.current);
@@ -479,12 +515,13 @@ export default function App() {
     };
     el.addEventListener('keydown', handler, true);
     return () => el.removeEventListener('keydown', handler, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levelIdx]);
 
   // ── Stable extensions ─────────────────────────────────────────────────────
   // forceHeight injects:
   //   1. OLED-black background overrides (beat vscodeDark's #1e1e1e)
-  //   2. Line-number: normal=dim #606060, active=clean white block + blue left bar
+  //   2. Line-number: normal=mid-gray #666666, active=pure #FFFFFF block + clean blue bar
   const forceHeight = useMemo(() =>
     EditorView.theme({
       // ── Layout / background ──────────────────────────────────────────────
@@ -496,22 +533,26 @@ export default function App() {
         background:  '#0d0d0d',
         borderRight: '1px solid #333',
       },
-      // Normal line numbers — dim gray, no background, no left border
+      // Normal line numbers — mid gray; contrast with pure-white active creates
+      // maximum visual pop without any glow trickery
       '.cm-lineNumbers .cm-gutterElement': {
-        color:      '#606060',
+        color:      '#666666',
         fontWeight: 'normal',
         padding:    '0 8px 0 4px',
         background: 'transparent',
         borderLeft: 'none',
       },
-      // Active-line gutter: sharp gray block + 3px blue left indicator, zero glow
+      // Active-line gutter: solid translucent block + clean blue left bar.
+      // Pure #FFFFFF 700-weight + WebkitTextStroke concentrates all photons
+      // on the stroke itself — sharper and subjectively brighter than any glow.
+      // No textShadow, no box-shadow: zero blur, zero energy dissipation.
       '.cm-activeLineGutter': {
-        background:  'rgba(255, 255, 255, 0.15)',
-        color:       '#ffffff',
-        fontWeight:  'normal',
-        textShadow:  'none',
-        borderLeft:  '3px solid #528bff',
-        padding:     '0 8px 0 1px',
+        background:       'rgba(255, 255, 255, 0.12)',
+        color:            '#FFFFFF !important',
+        fontWeight:       '700',
+        WebkitTextStroke: '0.5px #FFFFFF',
+        borderLeft:       '3px solid #528bff',
+        padding:          '0 8px 0 1px',
       },
     }), []);
 
@@ -557,16 +598,21 @@ export default function App() {
   const isLastLevel = levelIdx === LEVELS.length - 1;
   const currentCode = level.initialCode ?? INITIAL_CODE;
 
-  // Entropy blur: ramps up once past minSteps * 1.5 keystrokes, max 4 px
-  const minSteps    = level.minSteps ?? Infinity;
-  const blurPx      = isFinite(minSteps)
-    ? Math.max(0, Math.min(4, (entropy - minSteps * 1.5) * 0.5))
+  // ── Entropy blur (Bug 2 fix) ──────────────────────────────────────────────
+  // Rules:
+  //  • Levels 0-3 (L1-L4, tutorial): ZERO blur — always crystal-clear.
+  //  • Levels 4+ : blur starts ONLY when entropy ≥ minSteps × 3 (3× optimal).
+  //    Formula starts at 1 px, ramps up gradually (+0.3 px per extra key), max 4 px.
+  //  • Blur is scoped to .cm-content only (passed via CSS variable --contentBlur).
+  //    The gutter / line-numbers are NEVER blurred.
+  const minSteps       = level.minSteps ?? Infinity;
+  const isTutorialLevel = levelIdx < 4;          // L1-L4: no penalty
+  const blurPxContent  = (!isTutorialLevel && isFinite(minSteps))
+    ? Math.max(0, Math.min(4, 1 + (entropy - minSteps * 3) * 0.3))
     : 0;
-  // Mode filter: slight grayscale in Normal → saturate in Insert
+  // Mode filter (saturate / grayscale) stays on the full container — it never
+  // causes blur, only a subtle colour-saturation shift on mode change.
   const modeFilter  = vimMode === 'insert' ? 'saturate(115%)' : 'grayscale(12%)';
-  const filterStr   = blurPx > 0.05
-    ? `${modeFilter} blur(${blurPx.toFixed(1)}px)`
-    : modeFilter;
 
   return (
     <div className={`app vim-${vimMode}`}>
@@ -589,7 +635,10 @@ export default function App() {
       <div
         className={`editor-container${vimMode === 'insert' ? ' mode-insert-active' : ''}`}
         ref={wrapperRef}
-        style={{ filter: filterStr }}
+        style={{
+          filter: modeFilter,
+          ['--contentBlur' as string]: `${blurPxContent.toFixed(1)}px`,
+        }}
       >
         <CodeMirror
           key={levelIdx}
@@ -651,8 +700,8 @@ export default function App() {
               {vimMode.toUpperCase()}
             </span>
             {isFinite(minSteps) && (
-              <span className={`status-entropy${blurPx > 0.05 ? ' penalty' : ''}`}>
-                ⚡ {entropy}<span className="entropy-limit">/{Math.round(minSteps * 1.5)}</span>
+              <span className={`status-entropy${blurPxContent > 0.05 ? ' penalty' : ''}`}>
+                ⚡ {entropy}<span className="entropy-limit">/{Math.round(minSteps * 3)}</span>
               </span>
             )}
             {level.target && (

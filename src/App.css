@@ -34,7 +34,7 @@ html, body, #root {
   flex-direction: column;
   align-items: stretch;      /* never center children horizontally */
   text-align: left;          /* prevent any ancestor center leaking in */
-  transition: filter 0.25s ease, box-shadow 0.2s ease;
+  transition: box-shadow 0.2s ease;
 }
 
 /* Insert mode: breathing VSCode-blue border glow */
@@ -64,6 +64,15 @@ html, body, #root {
   font-size: 13px;
   font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
   text-align: left !important;   /* never inherit center-align from outside */
+}
+
+/* ─── Content-only blur (entropy penalty, Bug 2 fix) ────────────────────── */
+/* Blur is applied ONLY to the code content area, never to the gutter or
+   line numbers. The --contentBlur CSS variable is set inline by App.tsx
+   and is 0px for tutorial levels (L1-L4) and levels with low entropy. */
+.editor-container .cm-content {
+  filter: blur(var(--contentBlur, 0px));
+  transition: filter 0.3s ease;
 }
 
 /* ─── Cursor: ghosting-free, VS Code blue ─────────────────────────────── */
