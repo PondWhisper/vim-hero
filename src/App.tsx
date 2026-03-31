@@ -84,12 +84,11 @@ const LEVELS: Level[] = [
   {
     id: 2,
     title: 'Level 2: 单词跳跃',
-    description: '把光标移动到第 15 行的 "pivot" 单词的首字母 p 上。',
-    hint: '使用 w 跳到下一个单词，或者 e 到单词末尾，或手动用 h/l 移动。',
+    description: '把光标移动到第 5 行的 "pivot" 单词的首字母 p 上。',
+    hint: '先用 5G 跳到第 5 行，再用 w 反复跳单词，或用 l 微调，直到光标落在 p 上。',
     validate: (state) => {
-      // 第15行，且光标在 pivot 的 p 位置
-      // "    int pivot" 中，p 在第8个字符位置（0-indexed）
-      return state.line === 14 && state.col === 8;
+      // 物理第5行 = 0-indexed row 4，"    int pivot" 中 p 在 col 8
+      return state.line === 4 && state.col === 8;
     },
   },
   {
@@ -106,12 +105,13 @@ const LEVELS: Level[] = [
   {
     id: 4,
     title: 'Level 4: 暴力拆除',
-    description: '删除掉第 16 行（即 "for (int j = low; j < high; j++) {"）。',
-    hint: '将光标移到第 16 行，连按两下 d 键（dd）删除整行。',
+    description: '删除掉第 7 行（即 "for (int j = low; j < high; j++) {"）。',
+    hint: '将光标移到第 7 行，连按两下 d 键（dd）删除整行。',
+
     validate: (state, prevCode) => {
       // 检查：
       // 1. 行数比前一个关卡（Level 3）少 1
-      // 2. 原第16行的内容消失了
+      // 2. 原第7行的 for 循环消失了
       const prevLineCount = prevCode.split('\n').length;
       const hasForLoop = state.code.includes('for (int j = low; j < high; j++) {');
       return state.lineCount === prevLineCount - 1 && !hasForLoop;
