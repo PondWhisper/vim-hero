@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
 import { vim } from '@replit/codemirror-vim';
@@ -168,15 +168,22 @@ export default function App() {
         const code = doc.toString();
         const lineCount = doc.lines;
 
-        // 尝试获取 Vim 模式状态
+        // 简化的Vim模式检测: 通过检查交易元数据或状态标志
+        // 对于@replit/codemirror-vim，我们可以检查是否有待决的手势
         let mode: 'normal' | 'insert' = 'normal';
         try {
-          const vimState = update.state.field(vim.state, false);
-          if (vimState && vimState.mode === 'insert') {
-            mode = 'insert';
+          // 检查更新的事务是否有vim相关的元数据
+          if (update.transactions && update.transactions.length > 0) {
+            const hasVimInsert = update.transactions.some((tr: any) => 
+              tr.annotation?.('vim.mode') === 'insert' || 
+              tr.getMeta?.('vim.mode') === 'insert'
+            );
+            if (hasVimInsert) {
+              mode = 'insert';
+            }
           }
         } catch (e) {
-          // vim.state 不可用时，默认为 normal
+          // 模式检测失败，默认为normal
         }
 
         // 构建新的编辑器状态
