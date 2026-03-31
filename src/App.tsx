@@ -1,25 +1,18 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
 import { vim } from '@replit/codemirror-vim';
+import { highlightActiveLine } from '@codemirror/view';
+import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import './App.css';
 
 // 50行真实的 C++ Quick Sort 算法代码 - 所有关卡共用这个"持久化训练场"
 const INITIAL_CODE = `#include <iostream>
-#include <algorithm>
-#include <vector>
 using namespace std;
 
-// Quick Sort Implementation
-// A highly efficient sorting algorithm
-// Designed for educational purposes
-// This is a classic algorithm
-// Used in many real-world applications
-// O(n log n) average time complexity
-
 int partition(int arr[], int low, int high) {
-    int i = low - 1;
     int pivot = arr[high];
+    int i = low - 1;
     for (int j = low; j < high; j++) {
         if (arr[j] < pivot) {
             i++;
@@ -49,7 +42,7 @@ int main() {
     int arr[] = {64, 34, 25, 12, 22, 11, 90, 88};
     int n = sizeof(arr) / sizeof(arr[0]);
     
-    cout << "Unsorted array: ";
+    cout << "Original array: ";
     printArray(arr, n);
     
     quickSort(arr, 0, n - 1);
@@ -148,11 +141,15 @@ export default function App() {
     code: INITIAL_CODE,
     lineCount: INITIAL_CODE.split('\n').length,
   });
+  const [isLevelComplete, setIsLevelComplete] = useState(false);
+  const [showCompletionMessage, setShowCompletionMessage] = useState(false);
 
   // 追踪前一个关卡的代码状态
   const prevCodeRef = useRef<string>(INITIAL_CODE);
   // 追踪关卡完成状态，避免重复打印完成消息
   const prevLevelCompleteRef = useRef<boolean>(false);
+  // 自动推进定时器
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleUpdate = useCallback(
     (update: any) => {
@@ -168,11 +165,9 @@ export default function App() {
         const code = doc.toString();
         const lineCount = doc.lines;
 
-        // 简化的Vim模式检测: 通过检查交易元数据或状态标志
-        // 对于@replit/codemirror-vim，我们可以检查是否有待决的手势
+        // 简化的Vim模式检测
         let mode: 'normal' | 'insert' = 'normal';
         try {
-          // 检查更新的事务是否有vim相关的元数据
           if (update.transactions && update.transactions.length > 0) {
             const hasVimInsert = update.transactions.some((tr: any) => 
               tr.annotation?.('vim.mode') === 'insert' || 
@@ -205,8 +200,26 @@ export default function App() {
         if (levelComplete && !prevLevelCompleteRef.current) {
           console.log(`✅ Level ${currentLevelIndex + 1} completed!`);
           prevLevelCompleteRef.current = true;
+          setIsLevelComplete(true);
+          setShowCompletionMessage(true);
+          
+          // 自动推进到下一关（1秒后）
+          if (autoAdvanceTimerRef.current) {
+            clearTimeout(autoAdvanceTimerRef.current);
+          }
+          autoAdvanceTimerRef.current = setTimeout(() => {
+            if (currentLevelIndex < LEVELS.length - 1) {
+              prevCodeRef.current = newState.code;
+              prevLevelCompleteRef.current = false;
+              setShowCompletionMessage(false);
+              setIsLevelComplete(false);
+              setCurrentLevelIndex(currentLevelIndex + 1);
+            }
+          }, 1000);
         } else if (!levelComplete) {
           prevLevelCompleteRef.current = false;
+          setIsLevelComplete(false);
+          setShowCompletionMessage(false);
         }
       } catch (error) {
         console.error('❌ Error in handleUpdate:', error);
@@ -215,17 +228,16 @@ export default function App() {
     [currentLevelIndex]
   );
 
-  const handleNextLevel = useCallback(() => {
-    if (currentLevelIndex < LEVELS.length - 1) {
-      // 保存当前代码作为下一关的参考
-      prevCodeRef.current = editorState.code;
-      prevLevelCompleteRef.current = false;
-      setCurrentLevelIndex(currentLevelIndex + 1);
-    }
-  }, [currentLevelIndex, editorState.code]);
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current) {
+        clearTimeout(autoAdvanceTimerRef.current);
+      }
+    };
+  }, []);
 
   const currentLevel = LEVELS[currentLevelIndex];
-  const isLevelComplete = currentLevel.validate(editorState, prevCodeRef.current);
 
   return (
     <div className="app">
@@ -234,7 +246,7 @@ export default function App() {
         <CodeMirror
           value={editorState.code}
           height="100%"
-          extensions={[cpp(), vim()]}
+          extensions={[cpp(), vim(), highlightActiveLine()]}
           onUpdate={handleUpdate}
           basicSetup={{
             lineNumbers: true,
@@ -251,7 +263,7 @@ export default function App() {
             searchKeymap: true,
           }}
           className="code-mirror"
-          theme="dark"
+          theme={vscodeDark}
         />
       </div>
 
@@ -287,18 +299,16 @@ export default function App() {
             </div>
           </div>
 
-          {isLevelComplete && (
-            <div className="completion-section">
+          {showCompletionMessage && (
+            <div className={`completion-section ${isLevelComplete ? 'show' : ''}`}>
               <div className="completion-message">🎉 关卡完成！</div>
-              {currentLevelIndex < LEVELS.length - 1 && (
-                <button className="next-button" onClick={handleNextLevel}>
-                  下一关 →
-                </button>
-              )}
               {currentLevelIndex === LEVELS.length - 1 && (
                 <div className="all-complete">
                   🏆 所有关卡完成！恭喜你掌握了 Vim 的核心操作！
                 </div>
+              )}
+              {currentLevelIndex < LEVELS.length - 1 && (
+                <div className="auto-advance-hint">等等，准备进入下一关...</div>
               )}
             </div>
           )}
