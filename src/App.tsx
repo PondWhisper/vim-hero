@@ -1,319 +1,402 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
-import { cpp } from '@codemirror/lang-cpp';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import CodeMirror, { EditorView } from '@uiw/react-codemirror';
+import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
+import { javascript } from '@codemirror/lang-javascript';
 import { vim } from '@replit/codemirror-vim';
-import { highlightActiveLine } from '@codemirror/view';
+import { highlightActiveLine, Decoration } from '@codemirror/view';
+import type { DecorationSet } from '@codemirror/view';
+import { StateField, StateEffect } from '@codemirror/state';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import './App.css';
 
-// 50行真实的 C++ Quick Sort 算法代码 - 所有关卡共用这个"持久化训练场"
-const INITIAL_CODE = `#include <iostream>
-using namespace std;
+// ─── Ghost Cursor (Decoration.mark highlights the target character) ─────────
+const setGhostTarget = StateEffect.define<{ row: number; col: number } | null>();
 
-int partition(int arr[], int low, int high) {
-    int pivot = arr[high];
-    int i = low - 1;
-    for (int j = low; j < high; j++) {
-        if (arr[j] < pivot) {
-            i++;
-            swap(arr[i], arr[j]);
-        }
+const ghostCursorField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes); // track target char through edits
+    for (const effect of tr.effects) {
+      if (effect.is(setGhostTarget)) {
+        if (!effect.value) return Decoration.none;
+        const { row, col } = effect.value;
+        const lineNo = row + 1; // doc.line() is 1-indexed
+        if (lineNo > tr.state.doc.lines) return Decoration.none;
+        const line = tr.state.doc.line(lineNo);
+        const from = Math.min(line.from + col, line.to);
+        const to   = Math.min(from + 1, line.to);
+        if (from >= to) return Decoration.none;
+        return Decoration.set([
+          Decoration.mark({ class: 'cm-ghost-target' }).range(from, to),
+        ]);
+      }
     }
-    swap(arr[i + 1], arr[high]);
-    return i + 1;
-}
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
-void quickSort(int arr[], int low, int high) {
-    if (low < high) {
-        int pi = partition(arr, low, high);
-        quickSort(arr, low, pi - 1);
-        quickSort(arr, pi + 1, high);
-    }
-}
+// ─── Types ───────────────────────────────────────────────────────────────────
+type VimMode = 'normal' | 'insert' | 'visual' | 'replace';
 
-void printArray(int arr[], int size) {
-    for (int i = 0; i < size; i++) {
-        cout << arr[i] << " ";
-    }
-    cout << endl;
-}
-
-int main() {
-    int arr[] = {64, 34, 25, 12, 22, 11, 90, 88};
-    int n = sizeof(arr) / sizeof(arr[0]);
-    
-    cout << "Original array: ";
-    printArray(arr, n);
-    
-    quickSort(arr, 0, n - 1);
-    
-    cout << "Sorted array: ";
-    printArray(arr, n);
-    
-    return 0;
-}`;
-
-interface EditorState {
+interface EditorSnapshot {
   line: number;      // 0-indexed
   col: number;       // 0-indexed
-  mode: 'normal' | 'insert';
   code: string;
   lineCount: number;
 }
 
-interface Level {
+interface LevelSchema {
   id: number;
-  title: string;
-  description: string;
-  hint: string;
-  validate: (state: EditorState, prevCode: string) => boolean;
+  keys: string;                   // Keys badge shown in dashboard
+  instruction: string;
+  initialCode: string;
+  target?: { row: number; col: number }; // Ghost cursor target
+  validate: (
+    snap: EditorSnapshot,
+    vimMode: VimMode,
+    ctx: { current: Record<string, any> }
+  ) => boolean;
+  onKeyDown?: (
+    e: KeyboardEvent,
+    ctx: { current: Record<string, any> },
+    showToast: (msg: string) => void
+  ) => void;
 }
 
-// 5个实质性的连贯关卡定义
-const LEVELS: Level[] = [
+// ─── Level Definitions ───────────────────────────────────────────────────────
+const LEVELS: LevelSchema[] = [
+  // ── Level 1: Intro to Modes ──────────────────────────────────────────────
   {
     id: 1,
-    title: 'Level 1: 精准空降',
-    description: '将光标移动到第 15 行。',
-    hint: '你可以狂按 j（向下），或者使用高级命令 15G（快速跳到第15行）。',
-    validate: (state) => {
-      // 第15行 = 0-indexed的第14行
-      return state.line === 14;
-    },
+    keys: 'i  →  Esc',
+    instruction:
+      'The core of Vim is modes. Normal mode for navigation, Insert mode for typing. ' +
+      'Press i to enter Insert mode, then press Esc to return to Normal.',
+    initialCode: 'function welcome() {\n  console.log("Welcome to Vim Hero!");\n}',
+    // Validation: the user must complete the Insert → Normal round-trip.
+    // ctx.current.hasBeenInInsert is set by the global mode-change listener
+    // when mode becomes 'insert'. We check it here alongside the final mode.
+    validate: (_snap, vimMode, ctx) =>
+      ctx.current.hasBeenInInsert === true && vimMode === 'normal',
   },
+
+  // ── Level 2: Basic Movement ──────────────────────────────────────────────
   {
     id: 2,
-    title: 'Level 2: 单词跳跃',
-    description: '把光标移动到第 5 行的 "pivot" 单词的首字母 p 上。',
-    hint: '先用 5G 跳到第 5 行，再用 w 反复跳单词，或用 l 微调，直到光标落在 p 上。',
-    validate: (state) => {
-      // 物理第5行 = 0-indexed row 4，"    int pivot" 中 p 在 col 8
-      return state.line === 4 && state.col === 8;
-    },
+    keys: 'h  j  k  l',
+    instruction:
+      'Forget the mouse. Use h (left), j (down), k (up), l (right) to navigate. ' +
+      'Move the cursor to the "K" of "Keyboard".',
+    initialCode:
+      'const player = {\n  name: "Vim Knight",\n  level: 1,\n  weapon: "Keyboard"\n};',
+    // "Keyboard" is on line index 3 (4th line), 'K' is at col index 11
+    // Line: `  weapon: "Keyboard"`  → cols: 0=' ', 1=' ', ...10='"', 11='K'
+    target: { row: 3, col: 11 },
+    validate: (snap) => snap.line === 3 && snap.col === 11,
   },
+
+  // ── Level 3: Moving by Words ─────────────────────────────────────────────
   {
     id: 3,
-    title: 'Level 3: 进入插入模式并修改',
-    description: '把 "pivot" 变成 "pivotValue"。进入 Insert 模式，键入 Value，然后按下 Esc 回到 Normal 模式。',
-    hint: '按 i 进入 Insert 模式，输入 Value，再按 Esc 回到 Normal 模式。必须两个条件同时满足！',
-    validate: (state) => {
-      // 1. 代码包含 pivotValue
-      // 2. 当前模式是 normal（已经退出插入模式）
-      return state.code.includes('pivotValue') && state.mode === 'normal';
+    keys: 'w  e  b',
+    instruction:
+      'Moving character-by-character is too slow. Use w (next word start), ' +
+      'e (word end), b (previous word) to jump. Land on the first "err" parameter.',
+    initialCode:
+      'function handleError(req, res, err, status) {\n  if (err) throw err;\n}',
+    // First 'err' parameter: line 0, col 31
+    // `function handleError(req, res, ` is 31 chars → 'e' of 'err' is at col 31
+    target: { row: 0, col: 31 },
+    validate: (snap) => snap.line === 0 && snap.col === 31,
+    onKeyDown(e, ctx, showToast) {
+      if (e.key === 'l') {
+        ctx.current.consecutiveL = (ctx.current.consecutiveL ?? 0) + 1;
+        if (ctx.current.consecutiveL > 5) {
+          showToast(
+            "Try the 'w' key — think in word boundaries. That's the first principle of efficiency."
+          );
+          ctx.current.consecutiveL = 0;
+        }
+      } else {
+        ctx.current.consecutiveL = 0;
+      }
     },
   },
+
+  // ── Level 4: Insert Mode in Action ──────────────────────────────────────
   {
     id: 4,
-    title: 'Level 4: 暴力拆除',
-    description: '删除掉第 7 行（即 "for (int j = low; j < high; j++) {"）。',
-    hint: '将光标移到第 7 行，连按两下 d 键（dd）删除整行。',
-
-    validate: (state, prevCode) => {
-      // 检查：
-      // 1. 行数比前一个关卡（Level 3）少 1
-      // 2. 原第7行的 for 循环消失了
-      const prevLineCount = prevCode.split('\n').length;
-      const hasForLoop = state.code.includes('for (int j = low; j < high; j++) {');
-      return state.lineCount === prevLineCount - 1 && !hasForLoop;
-    },
-  },
-  {
-    id: 5,
-    title: 'Level 5: 时空回溯',
-    description: '哎呀，删错了！撤销刚才的删除操作，把代码恢复原状。',
-    hint: '在 Normal 模式下按下 u 键（undo），彻底撤销上一步的删除。',
-    validate: (state) => {
-      // 检查：
-      // 1. 代码包含 pivotValue（来自 Level 3 的修改）
-      // 2. for 循环被恢复了（来自 Level 4 的删除已撤销）
-      return state.code.includes('pivotValue') && state.code.includes('for (int j = low; j < high; j++) {');
-    },
+    keys: 'i / a  →  Esc',
+    instruction:
+      'Navigate to the "W" of "Wrld", press i (or a on \'r\') to enter Insert mode, ' +
+      'type \'o\', then Esc. Fix "Hello Wrld" → "Hello World".',
+    initialCode: 'let greeting = "Hello Wrld";',
+    // 'W' of "Wrld": row=0, col=22  →  `let greeting = "Hello W`  (22 chars before 'W')
+    target: { row: 0, col: 22 },
+    // Multi-step final-state check:
+    //   1. code must strictly equal the corrected string (whitespace-trimmed)
+    //   2. must be back in Normal mode (user pressed Esc after typing)
+    validate: (snap, vimMode) =>
+      snap.code.trim() === 'let greeting = "Hello World";' && vimMode === 'normal',
   },
 ];
 
-
+// ─── App Component ───────────────────────────────────────────────────────────
 export default function App() {
-  const [currentLevelIndex, setCurrentLevelIndex] = useState(0);
-  const [editorState, setEditorState] = useState<EditorState>({
-    line: 0,
-    col: 0,
-    mode: 'normal',
-    code: INITIAL_CODE,
-    lineCount: INITIAL_CODE.split('\n').length,
+  const [levelIdx, setLevelIdx] = useState(0);
+  const [snap, setSnap]         = useState<EditorSnapshot>({
+    line: 0, col: 0,
+    code: LEVELS[0].initialCode,
+    lineCount: LEVELS[0].initialCode.split('\n').length,
   });
-  const [isLevelComplete, setIsLevelComplete] = useState(false);
-  const [showCompletionMessage, setShowCompletionMessage] = useState(false);
+  const [vimMode, setVimMode]   = useState<VimMode>('normal');
+  const [toast, setToast]       = useState<string | null>(null);
+  const [success, setSuccess]   = useState(false);
 
-  // 追踪前一个关卡的代码状态
-  const prevCodeRef = useRef<string>(INITIAL_CODE);
-  // 追踪关卡完成状态，避免重复打印完成消息
-  const prevLevelCompleteRef = useRef<boolean>(false);
-  // 自动推进定时器
-  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── Refs for stale-closure-free event handlers ────────────────────────────
+  const levelIdxRef  = useRef(0);
+  levelIdxRef.current = levelIdx;
 
-  const handleUpdate = useCallback(
-    (update: any) => {
-      try {
-        // 获取光标位置信息
-        const main = update.state.selection.main;
-        const doc = update.state.doc;
-        const lineObj = doc.lineAt(main.head);
-        const line = lineObj.number - 1; // 转换为 0-indexed
-        const col = main.head - lineObj.from; // 相对于行首的位置
+  const snapRef      = useRef(snap);
+  snapRef.current    = snap;
 
-        // 获取当前代码内容
-        const code = doc.toString();
-        const lineCount = doc.lines;
+  const vimModeRef   = useRef<VimMode>('normal');
+  vimModeRef.current = vimMode;
 
-        // 简化的Vim模式检测
-        let mode: 'normal' | 'insert' = 'normal';
-        try {
-          if (update.transactions && update.transactions.length > 0) {
-            const hasVimInsert = update.transactions.some((tr: any) => 
-              tr.annotation?.('vim.mode') === 'insert' || 
-              tr.getMeta?.('vim.mode') === 'insert'
-            );
-            if (hasVimInsert) {
-              mode = 'insert';
-            }
-          }
-        } catch (e) {
-          // 模式检测失败，默认为normal
-        }
+  const alreadyPassedRef = useRef(false);
+  const customCtxRef     = useRef<Record<string, any>>({});
+  const advanceTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorRef        = useRef<ReactCodeMirrorRef>(null);
+  const wrapperRef       = useRef<HTMLDivElement>(null);
 
-        // 构建新的编辑器状态
-        const newState: EditorState = {
-          line,
-          col,
-          mode,
-          code,
-          lineCount,
-        };
+  // ── Toast helper (stable across renders) ─────────────────────────────────
+  const toastRef = useRef<(msg: string) => void>(() => {});
+  toastRef.current = (msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
+  };
+  const showToast = (msg: string) => toastRef.current(msg);
 
-        // 更新编辑器状态
-        setEditorState(newState);
+  // ── Advance to next level (triggered by validation) ───────────────────────
+  // Stored in a ref so the Vim listener (attached once) can always call the
+  // latest version without stale closures.
+  const triggerAdvanceRef = useRef<() => void>(() => {});
+  triggerAdvanceRef.current = () => {
+    setSuccess(true);
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = setTimeout(() => {
+      setSuccess(false);
+      customCtxRef.current    = {};
+      // Update ref synchronously so any validation calls before re-render
+      // use the correct new level index.
+      const next = Math.min(levelIdxRef.current + 1, LEVELS.length - 1);
+      levelIdxRef.current     = next;
+      alreadyPassedRef.current = false;
+      setLevelIdx(next);
+    }, 500);
+  };
 
-        // 检查当前关卡是否完成
-        const currentLevel = LEVELS[currentLevelIndex];
-        const levelComplete = currentLevel.validate(newState, prevCodeRef.current);
+  // ── Core validator (always reads latest state via refs) ───────────────────
+  const validateRef = useRef<(s: EditorSnapshot, m: VimMode) => void>(() => {});
+  validateRef.current = (s: EditorSnapshot, m: VimMode) => {
+    if (alreadyPassedRef.current) return;
+    if (LEVELS[levelIdxRef.current].validate(s, m, customCtxRef)) {
+      alreadyPassedRef.current = true;
+      triggerAdvanceRef.current();
+    }
+  };
 
-        if (levelComplete && !prevLevelCompleteRef.current) {
-          console.log(`✅ Level ${currentLevelIndex + 1} completed!`);
-          prevLevelCompleteRef.current = true;
-          setIsLevelComplete(true);
-          setShowCompletionMessage(true);
-          
-          // 自动推进到下一关（1秒后）
-          if (autoAdvanceTimerRef.current) {
-            clearTimeout(autoAdvanceTimerRef.current);
-          }
-          autoAdvanceTimerRef.current = setTimeout(() => {
-            if (currentLevelIndex < LEVELS.length - 1) {
-              prevCodeRef.current = newState.code;
-              prevLevelCompleteRef.current = false;
-              setShowCompletionMessage(false);
-              setIsLevelComplete(false);
-              setCurrentLevelIndex(currentLevelIndex + 1);
-            }
-          }, 1000);
-        } else if (!levelComplete) {
-          prevLevelCompleteRef.current = false;
-          setIsLevelComplete(false);
-          setShowCompletionMessage(false);
-        }
-      } catch (error) {
-        console.error('❌ Error in handleUpdate:', error);
-      }
-    },
-    [currentLevelIndex]
+  // ── CodeMirror onUpdate ────────────────────────────────────────────────────
+  // Mode is detected by inspecting the `cm-fat-cursor` class that
+  // @replit/codemirror-vim adds to `.cm-editor` in Normal/Visual modes.
+  // This is more reliable than any event-listener approach because it
+  // reads actual rendered state every time CodeMirror commits a transaction.
+  const handleUpdate = (update: any) => {
+    // ── Mode detection (runs on every transaction, including mode-only ones) ──
+    const editorDom = update.view.dom as HTMLElement;
+    const detectedMode: VimMode = editorDom.classList.contains('cm-fat-cursor')
+      ? 'normal'
+      : 'insert';
+    if (detectedMode !== vimModeRef.current) {
+      vimModeRef.current = detectedMode;
+      setVimMode(detectedMode);
+      if (detectedMode === 'insert') customCtxRef.current.hasBeenInInsert = true;
+      validateRef.current(snapRef.current, detectedMode);
+    }
+
+    // ── Snap update (only when doc or cursor actually moved) ─────────────────
+    if (!update.docChanged && !update.selectionSet) return;
+    const sel     = update.state.selection.main;
+    const doc     = update.state.doc;
+    const lineObj = doc.lineAt(sel.head);
+    const newSnap: EditorSnapshot = {
+      line:      lineObj.number - 1,
+      col:       sel.head - lineObj.from,
+      code:      doc.toString(),
+      lineCount: doc.lines,
+    };
+    setSnap(newSnap);
+    snapRef.current = newSnap;
+    validateRef.current(newSnap, vimModeRef.current);
+  };
+
+  // ── Set ghost cursor + initialise snap from actual doc on editor mount ─────
+  const handleCreateEditor = (view: EditorView) => {
+    // Populate snap immediately so Level 1 ctx isn't stale on first keystroke
+    const doc = view.state.doc;
+    const initSnap: EditorSnapshot = {
+      line: 0, col: 0,
+      code: doc.toString(),
+      lineCount: doc.lines,
+    };
+    setSnap(initSnap);
+    snapRef.current = initSnap;
+
+    // Set ghost cursor (deferred so CM6 finishes its own mount cycle first)
+    const target = LEVELS[levelIdxRef.current].target ?? null;
+    Promise.resolve().then(() =>
+      view.dispatch({ effects: setGhostTarget.of(target) })
+    );
+  };
+
+  // ── Per-level state reset on level change ─────────────────────────────────
+  // (key={levelIdx} on CodeMirror forces a fresh Vim instance; this resets
+  //  React state to match the new level's initial conditions.)
+  useEffect(() => {
+    alreadyPassedRef.current = false;
+    setVimMode('normal');
+    vimModeRef.current = 'normal';
+    const level = LEVELS[levelIdx];
+    const initSnap: EditorSnapshot = {
+      line: 0, col: 0,
+      code: level.initialCode,
+      lineCount: level.initialCode.split('\n').length,
+    };
+    setSnap(initSnap);
+    snapRef.current = initSnap;
+  }, [levelIdx]);
+
+  // ── Anti-pattern keystroke interceptor (capture phase) ───────────────────
+  useEffect(() => {
+    const el    = wrapperRef.current;
+    const level = LEVELS[levelIdx];
+    if (!el || !level.onKeyDown) return;
+    const handler = (e: KeyboardEvent) =>
+      level.onKeyDown!(e, customCtxRef, showToast);
+    el.addEventListener('keydown', handler, true);
+    return () => el.removeEventListener('keydown', handler, true);
+  }, [levelIdx]); // re-bind when level changes
+
+  // ── Stable extensions (never recreated) ──────────────────────────────────
+  // forceEditorHeight: fixes the "black screen" height-collapse bug where
+  // .cm-editor collapses to 0 even when the React height prop is "100%".
+  const forceEditorHeight = useMemo(
+    () =>
+      EditorView.theme({
+        '&':            { height: '100%' },
+        '.cm-scroller': { overflow: 'auto' },
+      }),
+    []
   );
 
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (autoAdvanceTimerRef.current) {
-        clearTimeout(autoAdvanceTimerRef.current);
-      }
-    };
+  const extensions = useMemo(() => [
+    javascript({ jsx: false }),
+    vim(),
+    highlightActiveLine(),
+    ghostCursorField,
+    forceEditorHeight,
+  ], [forceEditorHeight]);
+
+  // ── Cleanup timers on unmount ─────────────────────────────────────────────
+  useEffect(() => () => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    if (toastTimerRef.current)   clearTimeout(toastTimerRef.current);
   }, []);
 
-  const currentLevel = LEVELS[currentLevelIndex];
+  const currentLevel = LEVELS[levelIdx];
+  const isLastLevel  = levelIdx === LEVELS.length - 1;
 
   return (
-    <div className="app">
-      {/* 主编辑器区域 - 占据屏幕大部分 */}
-      <div className="editor-container">
+    <div className={`app vim-${vimMode}`}>
+
+      {/* Toast: anti-pattern warning */}
+      {toast && (
+        <div className="toast" role="alert" aria-live="assertive">
+          💡 {toast}
+        </div>
+      )}
+
+      {/* Success flash overlay */}
+      {success && (
+        <div className="success-flash" aria-live="polite">
+          {isLastLevel ? '🏆 All Levels Complete!' : `✅ Level ${levelIdx + 1} Complete!`}
+        </div>
+      )}
+
+      {/* Editor — key forces full remount (fresh Vim state) on level change */}
+      <div className="editor-container" ref={wrapperRef}>
         <CodeMirror
-          value={editorState.code}
+          key={levelIdx}
+          ref={editorRef}
+          defaultValue={currentLevel.initialCode}
           height="100%"
-          extensions={[cpp(), vim(), highlightActiveLine()]}
-          onUpdate={handleUpdate}
-          basicSetup={{
-            lineNumbers: true,
-            highlightActiveLineGutter: true,
-            foldGutter: true,
-            dropCursor: true,
-            allowMultipleSelections: true,
-            indentOnInput: true,
-            bracketMatching: true,
-            closeBrackets: true,
-            autocompletion: true,
-            rectangularSelection: true,
-            highlightSelectionMatches: true,
-            searchKeymap: true,
-          }}
-          className="code-mirror"
           theme={vscodeDark}
+          extensions={extensions}
+          onUpdate={handleUpdate}
+          onCreateEditor={handleCreateEditor}
+          basicSetup={{
+            lineNumbers:              true,
+            highlightActiveLineGutter: true,
+            foldGutter:               false,
+            dropCursor:               false,
+            allowMultipleSelections:  false,
+            indentOnInput:            true,
+            bracketMatching:          true,
+            closeBrackets:            false,
+            autocompletion:           false,
+            rectangularSelection:     false,
+            highlightSelectionMatches: false,
+            // Disable built-in search so '/' goes to Vim first
+            searchKeymap:             false,
+          }}
         />
       </div>
 
-      {/* 底部任务控制台 - 固定高度的任务面板 */}
+      {/* Bottom Dashboard */}
       <div className="dashboard">
-        <div className="dashboard-content">
+        <div className="dashboard-inner">
+
+          {/* Level header row */}
           <div className="level-header">
-            <div className="level-title">{currentLevel.title}</div>
-            <div className="level-progress">
-              {currentLevelIndex + 1} / {LEVELS.length}
-            </div>
+            <span className="level-id">Level {levelIdx + 1} / {LEVELS.length}</span>
+            <span className="level-keys">{currentLevel.keys}</span>
           </div>
 
-          <div className="level-description">{currentLevel.description}</div>
-          <div className="level-hint">💡 {currentLevel.hint}</div>
+          {/* Instruction */}
+          <p className="level-instruction">{currentLevel.instruction}</p>
 
+          {/* Status bar */}
           <div className="status-bar">
-            <div className="status-item">
-              <span className="status-label">光标位置:</span>
-              <span className="status-value">
-                Line {editorState.line + 1}, Col {editorState.col}
+            <span className="status-pos">
+              Ln <strong>{snap.line + 1}</strong>, Col <strong>{snap.col + 1}</strong>
+            </span>
+            <span className={`status-mode mode-${vimMode}`}>
+              {vimMode.toUpperCase()}
+            </span>
+            {currentLevel.target && (
+              <span className="status-target">
+                🎯 Target Ln {currentLevel.target.row + 1}, Col {currentLevel.target.col + 1}
               </span>
-            </div>
-            <div className="status-item">
-              <span className="status-label">Vim 模式:</span>
-              <span className={`status-value mode-${editorState.mode}`}>
-                {editorState.mode === 'insert' ? '📝 INSERT' : '⚡ NORMAL'}
-              </span>
-            </div>
-            <div className="status-item">
-              <span className="status-label">总行数:</span>
-              <span className="status-value">{editorState.lineCount}</span>
-            </div>
+            )}
           </div>
 
-          {showCompletionMessage && (
-            <div className={`completion-section ${isLevelComplete ? 'show' : ''}`}>
-              <div className="completion-message">🎉 关卡完成！</div>
-              {currentLevelIndex === LEVELS.length - 1 && (
-                <div className="all-complete">
-                  🏆 所有关卡完成！恭喜你掌握了 Vim 的核心操作！
-                </div>
-              )}
-              {currentLevelIndex < LEVELS.length - 1 && (
-                <div className="auto-advance-hint">等等，准备进入下一关...</div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
 }
+
+
