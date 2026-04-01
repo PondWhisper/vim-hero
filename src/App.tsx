@@ -311,6 +311,9 @@ export default function App() {
   const [entropy, setEntropy]     = useState(0); // keystroke counter → blur penalty
   // editorView: set in onCreateEditor, triggers the vim-mode-change useEffect
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  // Ref mirror of editorView — allows stable callbacks to read the latest view
+  // without triggering re-renders or closing over a stale value.
+  const editorViewRef = useRef<EditorView | null>(null);
 
   // ── Refs (avoid stale closures in stable callbacks) ───────────────────────
   const levelIdxRef      = useRef(0);
@@ -450,6 +453,7 @@ export default function App() {
     // double-invoke can silently drop the listener.  The dedicated
     // useEffect([editorView, levelIdx]) below is the single reliable place
     // to bind and clean up the CM5 event listener.
+    editorViewRef.current = view;
     setEditorView(view);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // all state via refs — intentionally stable
@@ -462,6 +466,28 @@ export default function App() {
     entropyRef.current = 0;
     setEntropy(0);
     modeHistoryRef.current = []; // clear sequence tracker for the new level
+
+    const view = editorViewRef.current;
+    if (!view) return;
+
+    // 1. Update ghost target cursor for the new level
+    const target = LEVELS[levelIdx].target ?? null;
+    view.dispatch({ effects: setGhostTarget.of(target) });
+
+    // 2. Replace doc only when the code content actually changes
+    //    (e.g. L6 uses L6_CODE with the phivot typo; all others use INITIAL_CODE).
+    //    When content is identical, skip to avoid clobbering cursor position.
+    const nextCode = LEVELS[levelIdx].initialCode ?? INITIAL_CODE;
+    const curCode  = view.state.doc.toString();
+    if (nextCode !== curCode) {
+      view.dispatch({
+        changes: { from: 0, to: curCode.length, insert: nextCode },
+      });
+    }
+
+    // 3. Restore focus so the player never needs to touch the mouse.
+    //    rAF ensures the React render cycle has committed before we focus.
+    requestAnimationFrame(() => { view.focus(); });
   }, [levelIdx]);
 
   // ── Bullet-proof vim-mode-change listener ─────────────────────────────────
@@ -641,7 +667,6 @@ export default function App() {
         }}
       >
         <CodeMirror
-          key={levelIdx}
           ref={editorRef}
           value={currentCode}
           height="100%"
