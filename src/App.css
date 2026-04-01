@@ -25,8 +25,7 @@ html, body, #root {
 
 /* ─── Editor Container ───────────────────────────────────────────────────── */
 .editor-container {
-  flex: 1 1 0%;      /* grow + shrink, with 0 base so flex math is exact */
-  min-height: 0;     /* critical: allows flex child to shrink below content height */
+  height: 100%;      /* Panel controls the size; we just fill it */
   overflow: hidden;
   border-bottom: 1px solid #222;
   position: relative;
@@ -117,16 +116,18 @@ html, body, #root {
   width: 0.6em;
   height: 1.2em;
   margin-right: -0.6em;
-  background: rgba(78, 201, 176, 0.45);
+  background: #1d8effa5;
+  border: none;
   border-radius: 2px;
+  opacity: 1;
   animation: ghost-pulse 1.4s ease-in-out infinite;
   vertical-align: text-bottom;
   pointer-events: none;
 }
 
 @keyframes ghost-pulse {
-  0%, 100% { background: rgba(78, 201, 176, 0.28); box-shadow: 0 2px 8px rgba(78, 201, 176, 0.3); }
-  50%       { background: rgba(78, 201, 176, 0.12); box-shadow: 0 1px 3px rgba(78, 201, 176, 0.1); }
+  0%, 100% { opacity: 1.0; }
+  50%       { opacity: 0.65; }
 }
 
 /* ─── Active Line ─────────────────────────────────────────────────────────── */
@@ -135,15 +136,14 @@ html, body, #root {
 
 /* ─── Dashboard (fixed height bottom panel) ───────────────────────────────── */
 .dashboard {
-  height: 200px;         /* fixed — editor takes the rest */
+  height: 100%;      /* Panel controls the size; we just fill it */
   width: 100%;
   box-sizing: border-box;
-  flex-shrink: 0;
   position: relative;    /* required: confetti canvas is absolute inside here */
   background: #121212;
   border-top: 1px solid #222;
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.60);
-  overflow: hidden;      /* clips confetti particles to 200 px zone */
+  overflow: hidden;      /* clips confetti particles to panel zone */
 }
 
 .dashboard-inner {
@@ -236,7 +236,6 @@ html, body, #root {
 .mode-replace { color: #f44747; border-color: rgba(244,71,71,.4);   background: rgba(244,71,71,.1);   }
 
 .status-target {
-  margin-left: auto;
   font-size: 11px;
   color: #4ec9b0;
   letter-spacing: 0.3px;
@@ -252,6 +251,39 @@ html, body, #root {
 }
 .status-entropy.penalty { color: #f44747; }
 .entropy-limit           { color: #555; }
+
+/* Status bar right group: target + mode toggle */
+.status-bar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Zen / Challenge mode toggle button */
+.mode-toggle {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(133,133,133,0.35);
+  background: rgba(133,133,133,0.07);
+  color: #858585;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.mode-toggle:hover {
+  border-color: rgba(82,139,255,0.5);
+  color: #aaaaaa;
+}
+.mode-toggle.active {
+  border-color: rgba(244,71,71,0.45);
+  background: rgba(244,71,71,0.08);
+  color: #f44747;
+}
 
 @keyframes target-fade {
   from { opacity: 1; }
@@ -329,11 +361,161 @@ html, body, #root {
   min-width: 28px;
 }
 
+/* ─── Video demo modal ───────────────────────────────────────────────────── */
+.video-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-modal {
+  position: relative;
+  width: min(640px, 92vw);
+  background: #121212;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+}
+
+.video-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #858585;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.video-close:hover { color: #d4d4d4; }
+
+/* "▶ 大神操作" button in level-header */
+.video-btn {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  border: 1px solid rgba(82, 139, 255, 0.4);
+  background: rgba(82, 139, 255, 0.08);
+  color: #528bff;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+.video-btn:hover {
+  border-color: rgba(82, 139, 255, 0.7);
+  background: rgba(82, 139, 255, 0.14);
+}
+
+/* ─── Command Sidebar ────────────────────────────────────────────────────────── */
+.command-sidebar {
+  height: 100%;
+  overflow-y: auto;
+  background: #0d0d0d;
+  border-left: 1px solid #1e1e1e;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2a2a transparent;
+}
+
+.sidebar-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #1e1e1e;
+  font-size: 10px;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmd-group { padding-bottom: 4px; }
+
+.cmd-group-label {
+  padding: 8px 14px 3px;
+  font-size: 9.5px;
+  color: #3a3a3a;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+}
+.cmd-row:hover { background: rgba(255,255,255,0.03); }
+
+.vim-key {
+  display: inline-block;
+  min-width: 32px;
+  text-align: center;
+  background: #1a1a1a;
+  border: 1px solid #383838;
+  border-bottom: 2px solid #484848;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  color: #d4d4d4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cmd-desc {
+  font-size: 11.5px;
+  color: #585858;
+  line-height: 1.4;
+}
+
+.cmd-fallback {
+  padding: 16px 14px;
+  font-size: 13px;
+  color: #858585;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* ─── Resize Handles ─────────────────────────────────────────────────────────── */
+.resize-handle-v {
+  width: 4px;
+  background: transparent;
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle-h {
+  height: 4px;
+  background: transparent;
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.resize-handle-v:hover,
+.resize-handle-v[data-resize-handle-active],
+.resize-handle-h:hover,
+.resize-handle-h[data-resize-handle-active] {
+  background: #528bff;
+}
+
 /* ─── Responsive (narrow screens) ───────────────────────────────────────── */
 @media (max-width: 600px) {
-  .dashboard            { height: 160px; }
   .dashboard-inner      { padding: 8px 12px; }
   .level-instruction    { -webkit-line-clamp: 3; }
   .status-target        { display: none; }
+  .command-sidebar      { display: none; }
+  .resize-handle-v      { display: none; }
 }
 

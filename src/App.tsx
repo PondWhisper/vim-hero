@@ -8,6 +8,7 @@ import type { DecorationSet } from '@codemirror/view';
 import { StateField, StateEffect } from '@codemirror/state';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import confetti from 'canvas-confetti';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import './App.css';
 
 // ─── C++ QuickSort code (single source of truth) ─────────────────────────────
@@ -112,6 +113,12 @@ interface EditorSnapshot {
   lineCount: number;
 }
 
+interface VimCommand {
+  key: string;        // displayed in <kbd>
+  desc: string;       // short Chinese description
+  category?: string;  // grouping label
+}
+
 interface LevelSchema {
   id: number;
   keys: string;
@@ -119,6 +126,9 @@ interface LevelSchema {
   minSteps?: number;      // theoretical optimal keystrokes (entropy threshold)
   initialCode?: string;  // per-level code, falls back to INITIAL_CODE
   target?: { row: number; col: number };
+  targets?: { row: number; col: number }[];  // ordered waypoints for multi-step levels
+  videoUrl?: string;                          // optimal-solution demo video (local path or URL)
+  commands?: VimCommand[];                    // sidebar quick-reference
   validate: (
     snap: EditorSnapshot,
     mode: VimMode,
@@ -173,12 +183,22 @@ const L6_CODE = INITIAL_CODE.replace(
   '    int phivot = arr[high];  // 选最右元素作为基准'
 );
 
+// ─── L4 end column (for $ waypoint ghost cursor) ───────────────────────────────
+// Line idx=4: "// 将数组分为两部分，左边<=pivot，右边>pivot"
+// Computed from INITIAL_CODE so it stays accurate if the string ever changes.
+const L4_END_COL = INITIAL_CODE.split('\n')[4].length - 1; // 29
+
 // ─── Level Definitions (7 levels, coordinates verified against INITIAL_CODE) ─
 const LEVELS: LevelSchema[] = [
   // ── L1 Gateway ───────────────────────────────────────────────────────────
   {
     id: 1, minSteps: 20,
+    videoUrl: undefined,
     keys: 'i → Esc',
+    commands: [
+      { key: 'i',   desc: '进入 Insert 模式（光标变细线）', category: '模式切换' },
+      { key: 'Esc', desc: '返回 Normal 模式（光标变方块）', category: '模式切换' },
+    ],
     instruction:
       'Vim 的灵魂是"模式"。按 i 进入 Insert 模式（光标变细线），' +
       '再按 Esc 回 Normal 模式（光标变方块）。完成一次切换即可通关。',
@@ -192,7 +212,14 @@ const LEVELS: LevelSchema[] = [
   // Line idx=6: "    int pivot = arr[high];"  → "    int " = 8 chars, 'p' at col 8
   {
     id: 2, minSteps: 10,
+    videoUrl: undefined,
     keys: 'h  j  k  l',
+    commands: [
+      { key: 'h', desc: '向左移动一个字符', category: '移动' },
+      { key: 'j', desc: '向下移动一行',     category: '移动' },
+      { key: 'k', desc: '向上移动一行',     category: '移动' },
+      { key: 'l', desc: '向右移动一个字符', category: '移动' },
+    ],
     instruction:
       '忘掉鼠标！只用 h/j/k/l 四键导航。' +
       '目标：移动到第 7 行 int pivot 中 "pivot" 的首字母 p 上。',
@@ -205,7 +232,13 @@ const LEVELS: LevelSchema[] = [
   // Line idx=8: "    for (int j = low; ...)"  → col 13 is 'j'
   {
     id: 3, minSteps: 6,
+    videoUrl: undefined,
     keys: 'w  e  b',
+    commands: [
+      { key: 'w', desc: '跳到下一词首',       category: '词跳跃' },
+      { key: 'e', desc: '跳到当前/下一词尾', category: '词跳跃' },
+      { key: 'b', desc: '跳到上一词首',       category: '词跳跃' },
+    ],
     instruction:
       '逐字符移动太慢！用 w（词首）e（词尾）b（前词）高速跳跃。' +
       '目标：跳到第 9 行 for 循环中的变量 j。',
@@ -228,10 +261,16 @@ const LEVELS: LevelSchema[] = [
   // Use 0 (col 0) and $ (line end) on the long Chinese comment at row=4.
   {
     id: 4, minSteps: 4,
+    videoUrl: undefined,
     keys: '0  $',
+    commands: [
+      { key: '0', desc: '跳到行首（第 0 列）', category: '行跳跃' },
+      { key: '$', desc: '跳到行尾',             category: '行跳跃' },
+      { key: '^', desc: '跳到行首非空字符',     category: '行跳跃' },
+    ],
     instruction:
       '用 0 跳到行首，$ 跳到行尾。移到第 5 行长注释上，依次按 0 和 $，通关！',
-    target: { row: 4, col: 0 },
+    targets: [{ row: 4, col: 0 }, { row: 4, col: L4_END_COL }],
     validate: (snap, _, ctx) =>
       snap.line === 4 &&
       ctx.current.used0      === true &&
@@ -246,7 +285,13 @@ const LEVELS: LevelSchema[] = [
   // Use o (open below) AND O (open above). Need 2+ extra lines + Normal mode.
   {
     id: 5, minSteps: 4,
+    videoUrl: undefined,
     keys: 'o  O',
+    commands: [
+      { key: 'o',   desc: '下方开辟新行并进入 Insert', category: '新建行' },
+      { key: 'O',   desc: '上方开辟新行并进入 Insert', category: '新建行' },
+      { key: 'Esc', desc: '返回 Normal 模式',           category: '模式切换' },
+    ],
     instruction:
       '用 o 在当前行下方开辟新行，O 在上方开辟新行，再按 Esc 回 Normal。' +
       '两种都必须用过才算通关。',
@@ -265,7 +310,14 @@ const LEVELS: LevelSchema[] = [
   // L6_CODE has "phivot" typo on row=6 col=8. Fix to "pivot" efficiently.
   {
     id: 6, minSteps: 6,
+    videoUrl: undefined,
     keys: 'ciw  cw  x',
+    commands: [
+      { key: 'x',   desc: '删除光标下的单个字符',     category: '删改' },
+      { key: 'cw',  desc: '删除到词尾并进入 Insert',   category: '删改' },
+      { key: 'ciw', desc: '删除整个单词并进入 Insert', category: '删改' },
+      { key: 'Esc', desc: '返回 Normal 模式',           category: '模式切换' },
+    ],
     instruction:
       '第 7 行藏了个 Bug：phivot → 应为 pivot！' +
       '用最少步数修正，熵值超标代码将变模糊。',
@@ -283,7 +335,15 @@ const LEVELS: LevelSchema[] = [
   // Arrow-key penalty: +20 entropy → instant blur.
   {
     id: 7, minSteps: 8,
+    videoUrl: undefined,
     keys: 'w  b  f  /n',
+    commands: [
+      { key: 'w',      desc: '跳到下一词首',         category: '语义跳跃' },
+      { key: 'b',      desc: '跳到上一词首',         category: '语义跳跃' },
+      { key: 'f{c}',  desc: '跳到行内下一个字符 c', category: '语义跳跃' },
+      { key: '/{pat}', desc: '向下搜索模式',         category: '搜索' },
+      { key: 'n',      desc: '跳到下一个搜索匹配',   category: '搜索' },
+    ],
     instruction:
       '终极效率！用语义跳跃（w/b/f/n）冲向第 12 行的 swap(arr[i], arr[j])。' +
       '方向键触发 +20 熵值处罚，代码立即模糊！',
@@ -297,6 +357,44 @@ const LEVELS: LevelSchema[] = [
   },
 ];
 
+// ─── Command Sidebar ─────────────────────────────────────────────────────────
+interface CommandSidebarProps {
+  commands?: VimCommand[];
+  levelKeys: string;
+  levelId: number;
+}
+
+function CommandSidebar({ commands, levelKeys, levelId }: CommandSidebarProps) {
+  const groups = commands
+    ? commands.reduce<Record<string, VimCommand[]>>((acc, cmd) => {
+        const cat = cmd.category ?? '指令';
+        (acc[cat] ??= []).push(cmd);
+        return acc;
+      }, {})
+    : null;
+
+  return (
+    <aside className="command-sidebar">
+      <div className="sidebar-header">Level {levelId} 指令速查</div>
+      {groups ? (
+        Object.entries(groups).map(([cat, cmds]) => (
+          <div key={cat} className="cmd-group">
+            <div className="cmd-group-label">{cat}</div>
+            {cmds.map(cmd => (
+              <div key={cmd.key} className="cmd-row">
+                <kbd className="vim-key">{cmd.key}</kbd>
+                <span className="cmd-desc">{cmd.desc}</span>
+              </div>
+            ))}
+          </div>
+        ))
+      ) : (
+        <div className="cmd-fallback">{levelKeys}</div>
+      )}
+    </aside>
+  );
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [levelIdx, setLevelIdx]   = useState(0);
@@ -309,6 +407,10 @@ export default function App() {
   const [toast, setToast]         = useState<string | null>(null);
   const [success, setSuccess]     = useState(false);
   const [entropy, setEntropy]     = useState(0); // keystroke counter → blur penalty
+  const [isChallengeMode, setIsChallengeMode] = useState(false); // false=Zen, true=Challenge
+  const [showMetrics, setShowMetrics]         = useState(false); // toggle step-count display
+  const [showVideo, setShowVideo]             = useState(false); // video demo modal
+  const [levelStepsLog, setLevelStepsLog]     = useState<number[]>([]); // player steps per completed level
   // editorView: set in onCreateEditor, triggers the vim-mode-change useEffect
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   // Ref mirror of editorView — allows stable callbacks to read the latest view
@@ -331,6 +433,9 @@ export default function App() {
   const entropyRef       = useRef(0); // ref mirror of entropy — no stale closure in handlers
   // Mode sequence history — used by Level 1 to detect insert→normal transition
   const modeHistoryRef   = useRef<VimMode[]>([]);
+  // Waypoint index: tracks which ghost cursor target is currently active (multi-step levels)
+  const waypointIdxRef   = useRef(0);
+  const [waypointIdx, setWaypointIdx] = useState(0);
   // Confetti canvas + instance (scoped to dashboard, never leaks into editor)
   const confettiCanvasRef    = useRef<HTMLCanvasElement | null>(null);
   const confettiInstanceRef  = useRef<confetti.CreateTypes | null>(null);
@@ -370,9 +475,16 @@ export default function App() {
     advTimerRef.current = setTimeout(() => {
       setSuccess(false);
       customCtxRef.current = {};
+      // Record this level's player step count before advancing
+      setLevelStepsLog(prev => {
+        const updated = [...prev];
+        updated[levelIdxRef.current] = entropyRef.current;
+        return updated;
+      });
       const next = Math.min(levelIdxRef.current + 1, LEVELS.length - 1);
       levelIdxRef.current  = next;
       alreadyDoneRef.current = false;
+      setShowVideo(false); // close video modal on level change
       setLevelIdx(next);
     }, 1200);
   };
@@ -382,7 +494,25 @@ export default function App() {
   validateRef.current = (s, m) => {
     if (alreadyDoneRef.current) return;
     customCtxRef.current._entropy = entropyRef.current; // expose for level validate fns
-    if (LEVELS[levelIdxRef.current].validate(s, m, customCtxRef)) {
+    // ── Waypoint advancement (multi-step levels, e.g. L4 0→$) ────────────────
+    const lvl = LEVELS[levelIdxRef.current];
+    if (lvl.targets && lvl.targets.length > 1) {
+      const wpIdx = waypointIdxRef.current;
+      const wp    = lvl.targets[wpIdx];
+      if (s.line === wp.row && s.col === wp.col && wpIdx < lvl.targets.length - 1) {
+        const nextIdx = wpIdx + 1;
+        waypointIdxRef.current = nextIdx;
+        setWaypointIdx(nextIdx);
+        const view = editorViewRef.current;
+        if (view) {
+          // Defer: must not synchronously dispatch inside a CM update cycle
+          Promise.resolve().then(() =>
+            view.dispatch({ effects: setGhostTarget.of(lvl.targets![nextIdx]) })
+          );
+        }
+      }
+    }
+    if (lvl.validate(s, m, customCtxRef)) {
       alreadyDoneRef.current = true;
       triggerAdvanceRef.current();
     }
@@ -442,9 +572,10 @@ export default function App() {
     setSnap(ns);
     snapRef.current = ns;
 
-    const target = LEVELS[levelIdxRef.current].target ?? null;
+    const lvlCreate   = LEVELS[levelIdxRef.current];
+    const firstTarget = lvlCreate.targets?.[0] ?? lvlCreate.target ?? null;
     Promise.resolve().then(() =>
-      view.dispatch({ effects: setGhostTarget.of(target) })
+      view.dispatch({ effects: setGhostTarget.of(firstTarget) })
     );
 
     // Trigger the vim-mode-change useEffect by storing the fresh view.
@@ -466,13 +597,16 @@ export default function App() {
     entropyRef.current = 0;
     setEntropy(0);
     modeHistoryRef.current = []; // clear sequence tracker for the new level
+    waypointIdxRef.current = 0;  // reset waypoint to first target
+    setWaypointIdx(0);
 
     const view = editorViewRef.current;
     if (!view) return;
 
-    // 1. Update ghost target cursor for the new level
-    const target = LEVELS[levelIdx].target ?? null;
-    view.dispatch({ effects: setGhostTarget.of(target) });
+    // 1. Update ghost target cursor — use first waypoint if multi-step, else single target
+    const lvlReset    = LEVELS[levelIdx];
+    const firstTarget = lvlReset.targets?.[0] ?? lvlReset.target ?? null;
+    view.dispatch({ effects: setGhostTarget.of(firstTarget) });
 
     // 2. Replace doc only when the code content actually changes
     //    (e.g. L6 uses L6_CODE with the phivot typo; all others use INITIAL_CODE).
@@ -620,9 +754,21 @@ export default function App() {
     confettiInstanceRef.current?.reset();
   }, []);
 
-  const level       = LEVELS[levelIdx];
-  const isLastLevel = levelIdx === LEVELS.length - 1;
-  const currentCode = level.initialCode ?? INITIAL_CODE;
+  const level         = LEVELS[levelIdx];
+  const isLastLevel   = levelIdx === LEVELS.length - 1;
+  const currentCode   = level.initialCode ?? INITIAL_CODE;
+  // Active ghost cursor target: follows waypoint progression for multi-step levels
+  const currentTarget = level.targets?.[waypointIdx] ?? level.target ?? null;
+
+  // ── Cumulative step metrics ───────────────────────────────────────────────
+  // Sum of minSteps from L1 through current level (best-possible cumulative score)
+  const cumulativeBestSteps = useMemo(() =>
+    LEVELS.slice(0, levelIdx + 1).reduce((sum, l) => sum + (l.minSteps ?? 0), 0),
+  [levelIdx]);
+  // Sum of player steps in completed levels + current level's running count
+  const cumulativePlayerSteps = useMemo(() =>
+    levelStepsLog.slice(0, levelIdx).reduce((sum, s) => sum + (s ?? 0), 0) + entropy,
+  [levelStepsLog, levelIdx, entropy]);
 
   // ── Entropy blur (Bug 2 fix) ──────────────────────────────────────────────
   // Rules:
@@ -633,7 +779,7 @@ export default function App() {
   //    The gutter / line-numbers are NEVER blurred.
   const minSteps       = level.minSteps ?? Infinity;
   const isTutorialLevel = levelIdx < 4;          // L1-L4: no penalty
-  const blurPxContent  = (!isTutorialLevel && isFinite(minSteps))
+  const blurPxContent  = (isChallengeMode && !isTutorialLevel && isFinite(minSteps))
     ? Math.max(0, Math.min(4, 1 + (entropy - minSteps * 3) * 0.3))
     : 0;
   // Mode filter (saturate / grayscale) stays on the full container — it never
@@ -657,87 +803,147 @@ export default function App() {
         </div>
       )}
 
-      {/* Editor */}
-      <div
-        className={`editor-container${vimMode === 'insert' ? ' mode-insert-active' : ''}`}
-        ref={wrapperRef}
-        style={{
-          filter: modeFilter,
-          ['--contentBlur' as string]: `${blurPxContent.toFixed(1)}px`,
-        }}
-      >
-        <CodeMirror
-          ref={editorRef}
-          value={currentCode}
-          height="100%"
-          theme={vscodeDark}
-          extensions={extensions}
-          onUpdate={handleUpdate}
-          onCreateEditor={handleCreateEditor}
-          basicSetup={{
-            lineNumbers:               true,
-            highlightActiveLineGutter: false, // handled by explicit highlightActiveLineGutter() in extensions
-            highlightActiveLine:       false, // handled by explicit highlightActiveLine() in extensions
-            drawSelection:             false, // handled by explicit drawSelection() in extensions
-            foldGutter:                false,
-            dropCursor:                false,
-            allowMultipleSelections:   false,
-            indentOnInput:             false,
-            bracketMatching:           true,
-            closeBrackets:             false,
-            autocompletion:            false,
-            rectangularSelection:      false,
-            highlightSelectionMatches: false,
-            searchKeymap:              false,
-          }}
-        />
-      </div>
+      <PanelGroup direction="horizontal" id="root-h" style={{ flex: '1 1 0%', minHeight: 0 }}>
 
-      {/* Dashboard — position:relative so canvas can fill it absolutely */}
-      <div className="dashboard">
-        {/* Confetti canvas: pointer-events:none so it never blocks clicks */}
-        <canvas
-          ref={confettiCanvasRef}
-          style={{
-            position:      'absolute',
-            top:           0,
-            left:          0,
-            width:         '100%',
-            height:        '100%',
-            pointerEvents: 'none',
-            zIndex:        10,
-          }}
-        />
-        <div className="dashboard-inner">
+        {/* ── Left: Editor + Dashboard ── */}
+        <Panel defaultSize={75} minSize={40} id="left-panel">
+          <PanelGroup direction="vertical" id="root-v" style={{ height: '100%' }}>
 
-          <div className="level-header">
-            <span className="level-id">Level {levelIdx + 1} / {LEVELS.length}</span>
-            <span className="level-keys">{level.keys}</span>
+            {/* Editor */}
+            <Panel defaultSize={70} minSize={30} id="editor-panel">
+              <div
+                className={`editor-container${vimMode === 'insert' ? ' mode-insert-active' : ''}`}
+                ref={wrapperRef}
+                style={{
+                  filter: modeFilter,
+                  ['--contentBlur' as string]: `${blurPxContent.toFixed(1)}px`,
+                }}
+              >
+                <CodeMirror
+                  ref={editorRef}
+                  value={currentCode}
+                  height="100%"
+                  theme={vscodeDark}
+                  extensions={extensions}
+                  onUpdate={handleUpdate}
+                  onCreateEditor={handleCreateEditor}
+                  basicSetup={{
+                    lineNumbers:               true,
+                    highlightActiveLineGutter: false,
+                    highlightActiveLine:       false,
+                    drawSelection:             false,
+                    foldGutter:                false,
+                    dropCursor:                false,
+                    allowMultipleSelections:   false,
+                    indentOnInput:             false,
+                    bracketMatching:           true,
+                    closeBrackets:             false,
+                    autocompletion:            false,
+                    rectangularSelection:      false,
+                    highlightSelectionMatches: false,
+                    searchKeymap:              false,
+                  }}
+                />
+              </div>
+            </Panel>
+
+            <PanelResizeHandle className="resize-handle-h" />
+
+            {/* Dashboard */}
+            <Panel defaultSize={30} minSize={15} maxSize={55} id="dashboard-panel">
+              <div className="dashboard">
+                {/* Confetti canvas: pointer-events:none so it never blocks clicks */}
+                <canvas
+                  ref={confettiCanvasRef}
+                  style={{
+                    position:      'absolute',
+                    top:           0,
+                    left:          0,
+                    width:         '100%',
+                    height:        '100%',
+                    pointerEvents: 'none',
+                    zIndex:        10,
+                  }}
+                />
+                <div className="dashboard-inner">
+
+                  <div className="level-header">
+                    <span className="level-id">Level {levelIdx + 1} / {LEVELS.length}</span>
+                    <span className="level-keys">{level.keys}</span>
+                    {level.videoUrl && (
+                      <button className="video-btn" onClick={() => setShowVideo(true)}>
+                        ▶ 大神操作
+                      </button>
+                    )}
+                  </div>
+
+                  <p className="level-instruction">{level.instruction}</p>
+
+                  <div className="status-bar">
+                    <span className="status-pos">
+                      Ln <strong>{snap.line + 1}</strong>, Col <strong>{snap.col + 1}</strong>
+                    </span>
+                    <span className={`status-mode mode-${vimMode}`}>
+                      {vimMode.toUpperCase()}
+                    </span>
+                    {showMetrics && (
+                      <span className={`status-entropy${blurPxContent > 0.05 ? ' penalty' : ''}`}>
+                        ⚡ {cumulativePlayerSteps}
+                        <span className="entropy-limit"> / {cumulativeBestSteps} 最优</span>
+                      </span>
+                    )}
+                    <div className="status-bar-right">
+                      {currentTarget && (
+                        <span className="status-target">
+                          🎯 目标 Ln {currentTarget.row + 1}, Col {currentTarget.col + 1}
+                        </span>
+                      )}
+                      <button
+                        className="mode-toggle"
+                        onClick={() => setShowMetrics(v => !v)}
+                        title={showMetrics ? '隐藏步数统计' : '显示步数统计'}
+                      >
+                        {showMetrics ? '📊 统计' : '📊'}
+                      </button>
+                      <button
+                        className={`mode-toggle${isChallengeMode ? ' active' : ''}`}
+                        onClick={() => setIsChallengeMode(v => !v)}
+                        title={isChallengeMode ? '挑战模式 — 点击切换为禅定' : '禅定模式 — 点击开启挑战'}
+                      >
+                        {isChallengeMode ? '⚔ 挑战' : '☯ 禅定'}
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </Panel>
+
+          </PanelGroup>
+        </Panel>
+
+        <PanelResizeHandle className="resize-handle-v" />
+
+        {/* ── Right: Command Sidebar ── */}
+        <Panel defaultSize={25} minSize={15} maxSize={45} id="sidebar-panel" collapsible>
+          <CommandSidebar
+            commands={level.commands}
+            levelKeys={level.keys}
+            levelId={levelIdx + 1}
+          />
+        </Panel>
+
+      </PanelGroup>
+
+      {/* Video modal */}
+      {showVideo && level.videoUrl && (
+        <div className="video-overlay" onClick={() => setShowVideo(false)}>
+          <div className="video-modal" onClick={e => e.stopPropagation()}>
+            <button className="video-close" onClick={() => setShowVideo(false)}>✕</button>
+            <video src={level.videoUrl} autoPlay controls loop style={{ width: '100%', borderRadius: '4px' }} />
           </div>
-
-          <p className="level-instruction">{level.instruction}</p>
-
-          <div className="status-bar">
-            <span className="status-pos">
-              Ln <strong>{snap.line + 1}</strong>, Col <strong>{snap.col + 1}</strong>
-            </span>
-            <span className={`status-mode mode-${vimMode}`}>
-              {vimMode.toUpperCase()}
-            </span>
-            {isFinite(minSteps) && (
-              <span className={`status-entropy${blurPxContent > 0.05 ? ' penalty' : ''}`}>
-                ⚡ {entropy}<span className="entropy-limit">/{Math.round(minSteps * 3)}</span>
-              </span>
-            )}
-            {level.target && (
-              <span className="status-target">
-                🎯 目标 Ln {level.target.row + 1}, Col {level.target.col + 1}
-              </span>
-            )}
-          </div>
-
         </div>
-      </div>
+      )}
     </div>
   );
 }
