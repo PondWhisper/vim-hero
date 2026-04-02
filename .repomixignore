@@ -1,0 +1,10 @@
+# 忽略非文本和依赖
+node_modules/
+dist/
+.git/
+*.png
+*.svg
+package-lock.json
+
+# 也可以忽略你不打算让 AI 动的文件夹
+# assets/

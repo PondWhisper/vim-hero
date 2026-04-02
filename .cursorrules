@@ -1,0 +1,13 @@
+# Cursor 协作行为准则
+
+- **UI 保护**：严禁在未授权的情况下重构或精简 `src/App.tsx` 中的 HTML 结构和 CSS 类名。
+- **逻辑分层**：Vim 核心逻辑必须在 `src/engine/` 下修改，严禁在 UI 组件中堆砌算法。
+- **微创修改**：优先给出具体行号的代码片段（Partial Diff），不要全文重写超过 500 行的文件。
+- **光标状态**：处理过关逻辑时，必须确保 `editorView.focus()` 被显式调用。
+- **工作流**：在执行大规模修改前，先用伪代码列出你的实现路径让我确认。
+“不要输出整个文件！只给出修改部分的代码片段（Partial Diffs），并指明插入的行号。严禁任何废话解释。”
+# 速度优化协议
+- Always be concise.
+- Do not repeat code that is not being changed.
+- Use comments like "// ... existing code ..." to skip unchanged sections.
+- If the fix is a single line, only provide that line.

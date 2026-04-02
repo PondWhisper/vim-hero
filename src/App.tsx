@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+﻿import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import CodeMirror, { EditorView } from '@uiw/react-codemirror';
 import type { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
 import { vim, getCM } from '@replit/codemirror-vim';
-import { highlightActiveLine, highlightActiveLineGutter, Decoration, WidgetType, drawSelection } from '@codemirror/view';
-import type { DecorationSet } from '@codemirror/view';
-import { StateField, StateEffect } from '@codemirror/state';
+import { highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view';
+import type { VimMode, EditorSnapshot, VimCommand, LevelSchema } from './engine/reducer';
+import { setGhostTarget, ghostCursorField } from './components/GhostCursorWidget';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import confetti from 'canvas-confetti';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
@@ -102,80 +102,6 @@ int main() {
     printArray(arr, n);
     return 0;
 }`;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-type VimMode = 'normal' | 'insert' | 'visual' | 'replace';
-
-interface EditorSnapshot {
-  line: number;      // 0-indexed
-  col: number;       // 0-indexed
-  code: string;
-  lineCount: number;
-}
-
-interface VimCommand {
-  key: string;        // displayed in <kbd>
-  desc: string;       // short Chinese description
-  category?: string;  // grouping label
-}
-
-interface LevelSchema {
-  id: number;
-  keys: string;
-  instruction: string;
-  minSteps?: number;      // theoretical optimal keystrokes (entropy threshold)
-  initialCode?: string;  // per-level code, falls back to INITIAL_CODE
-  target?: { row: number; col: number };
-  targets?: { row: number; col: number }[];  // ordered waypoints for multi-step levels
-  videoUrl?: string;                          // optimal-solution demo video (local path or URL)
-  commands?: VimCommand[];                    // sidebar quick-reference
-  validate: (
-    snap: EditorSnapshot,
-    mode: VimMode,
-    ctx: { current: Record<string, any> }
-  ) => boolean;
-  onKeyDown?: (
-    e: KeyboardEvent,
-    ctx: { current: Record<string, any> },
-    showToast: (msg: string) => void
-  ) => void;
-}
-
-// ─── Ghost Cursor Widget ──────────────────────────────────────────────────────
-class GhostCursorWidget extends WidgetType {
-  toDOM() {
-    const el = document.createElement('span');
-    el.className = 'cm-ghost-cursor-widget';
-    return el;
-  }
-  ignoreEvent() { return true; }
-}
-
-const setGhostTarget = StateEffect.define<{ row: number; col: number } | null>();
-
-const ghostCursorField = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(deco, tr) {
-    deco = deco.map(tr.changes);
-    for (const effect of tr.effects) {
-      if (!effect.is(setGhostTarget)) continue;
-      if (!effect.value) return Decoration.none;
-      const { row, col } = effect.value;
-      const lineNo = row + 1;
-      if (lineNo > tr.state.doc.lines) return Decoration.none;
-      const line = tr.state.doc.line(lineNo);
-      const pos  = Math.min(line.from + col, line.to);
-      return Decoration.set([
-        Decoration.widget({
-          widget: new GhostCursorWidget(),
-          side: 0,
-        }).range(pos),
-      ]);
-    }
-    return deco;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
 
 // ─── L6 initial code: phivot typo on idx=6 ─────────────────────────────────
 const L6_CODE = INITIAL_CODE.replace(
