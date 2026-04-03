@@ -26,6 +26,7 @@ export interface LevelSchema {
   targets?: { row: number; col: number }[];  // ordered waypoints for multi-step levels
   videoUrl?: string;                          // optimal-solution demo video (local path or URL)
   commands?: VimCommand[];                    // sidebar quick-reference
+  initialCursor?: { row: number; col: number }; // where the cursor lands when level loads (0-indexed)
   validate: (
     snap: EditorSnapshot,
     mode: VimMode,
@@ -36,4 +37,9 @@ export interface LevelSchema {
     ctx: { current: Record<string, any> },
     showToast: (msg: string) => void
   ) => void;
+  // + 动态靶点：根据当前光标和代码内容实时计算目标位置
+  dynamicTarget?: (
+    currentCursor: { row: number; col: number },
+    buffer: string[]
+  ) => { row: number; col: number } | null;
 }

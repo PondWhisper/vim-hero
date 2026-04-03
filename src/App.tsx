@@ -9,6 +9,7 @@ import { setGhostTarget, ghostCursorField } from './components/GhostCursorWidget
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import confetti from 'canvas-confetti';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import { nextWPosition } from './engine/tokenizer';
 import './App.css';
 
 // ─── C++ QuickSort code (single source of truth) ─────────────────────────────
@@ -154,8 +155,7 @@ const LEVELS: LevelSchema[] = [
   },
 
   // ── L3 Leap ───────────────────────────────────────────────────────────────
-  // Target: 'j' in "for (int j" — row=8, col=13
-  // Line idx=8: "    for (int j = low; ...)"  → col 13 is 'j'
+  // dynamicTarget: 根据玩家当前光标动态算出下一个 w 的落点
   {
     id: 3, minSteps: 6,
     videoUrl: undefined,
@@ -168,8 +168,15 @@ const LEVELS: LevelSchema[] = [
     instruction:
       '逐字符移动太慢！用 w（词首）e（词尾）b（前词）高速跳跃。' +
       '目标：跳到第 9 行 for 循环中的变量 j。',
-    target: { row: 8, col: 13 },
-    validate: (snap) => snap.line === 8 && snap.col === 13,
+    dynamicTarget: (cursor, buffer) =>
+      nextWPosition(buffer, cursor.row, cursor.col),
+    validate: (snap, mode, ctx) => {
+      if (mode !== 'normal') return false;
+      const start = ctx.current.startCursor;
+      if (!start) return snap.line === 8 && snap.col === 13; // fallback
+      const expected = nextWPosition(snap.code.split('\n'), start.row, start.col);
+      return !!expected && snap.line === expected.row && snap.col === expected.col;
+    },
     onKeyDown(e, ctx, showToast) {
       if (e.key === 'l') {
         ctx.current.consL = (ctx.current.consL ?? 0) + 1;
@@ -333,6 +340,26 @@ export default function App() {
   const [toast, setToast]         = useState<string | null>(null);
   const [success, setSuccess]     = useState(false);
   const [entropy, setEntropy]     = useState(0); // keystroke counter → blur penalty
+  const [showIntro, setShowIntro] = useState(true);
+  const showIntroRef = useRef(true);
+  showIntroRef.current = showIntro;
+
+  // + 修复：全局拦截任意键以关闭弹窗，避免焦点丢失导致死锁
+  useEffect(() => {
+    if (!showIntro) return;
+    const handleModalKey = (e: KeyboardEvent) => {
+      if (['Control','Alt','Shift','Meta','CapsLock','Tab'].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setShowIntro(false);
+      // 弹窗消失后，强制将光标焦点还给编辑器
+      requestAnimationFrame(() => editorViewRef.current?.focus());
+    };
+    // 使用 capture: true 在事件捕获阶段最先拦截全局按键
+    window.addEventListener('keydown', handleModalKey, { capture: true });
+    return () => window.removeEventListener('keydown', handleModalKey, { capture: true });
+  }, [showIntro]);
+
   const [isChallengeMode, setIsChallengeMode] = useState(false); // false=Zen, true=Challenge
   const [showMetrics, setShowMetrics]         = useState(false); // toggle step-count display
   const [showVideo, setShowVideo]             = useState(false); // video demo modal
@@ -515,29 +542,52 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // all state via refs — intentionally stable
 
-  // ── Level change reset ────────────────────────────────────────────────────
+  // ── 1. 关卡状态预备 (触发于关卡序号切换时) ────────────────────────────────
   useEffect(() => {
     alreadyDoneRef.current = false;
-    setVimMode('normal');
-    vimModeRef.current = 'normal';
     entropyRef.current = 0;
     setEntropy(0);
     modeHistoryRef.current = []; // clear sequence tracker for the new level
     waypointIdxRef.current = 0;  // reset waypoint to first target
     setWaypointIdx(0);
 
+    // 核心：只弹出教学弹窗，绝对不触碰底层的 CodeMirror！保留上一关的胜利现场。
+    setShowIntro(true);
+  }, [levelIdx]);
+
+  // ── 2. 战场真实切换 (触发于玩家按下任意键关闭弹窗时) ──────────────────────
+  useEffect(() => {
+    // 只要弹窗还在，就冻结上一关的战场画面
+    if (showIntro) return;
+
     const view = editorViewRef.current;
     if (!view) return;
 
-    // 1. Update ghost target cursor — use first waypoint if multi-step, else single target
-    const lvlReset    = LEVELS[levelIdx];
-    const firstTarget = lvlReset.targets?.[0] ?? lvlReset.target ?? null;
+    // 玩家关闭弹窗，此时才真正重置模式、替换代码、设置新目标
+    setVimMode('normal');
+    vimModeRef.current = 'normal';
+
+    const lvlReset = LEVELS[levelIdx];
+    const buffer   = view.state.doc.toString().split('\n');
+
+    // 获取当前真实的物理光标位置
+    const head      = view.state.selection.main.head;
+    const lineObj   = view.state.doc.lineAt(head);
+    const currentCursor = { row: lineObj.number - 1, col: head - lineObj.from };
+
+    // 将起始光标存入 customCtxRef，供动态 validate 比对用
+    customCtxRef.current.startCursor = currentCursor;
+
+    // 优先计算动态靶点，如果没有则降级使用静态 target
+    let computedTarget: { row: number; col: number } | null = null;
+    if (typeof lvlReset.dynamicTarget === 'function') {
+      computedTarget = lvlReset.dynamicTarget(currentCursor, buffer);
+    }
+    const firstTarget = computedTarget ?? lvlReset.targets?.[0] ?? lvlReset.target ?? null;
     view.dispatch({ effects: setGhostTarget.of(firstTarget) });
 
-    // 2. Replace doc only when the code content actually changes
-    //    (e.g. L6 uses L6_CODE with the phivot typo; all others use INITIAL_CODE).
-    //    When content is identical, skip to avoid clobbering cursor position.
-    const nextCode = LEVELS[levelIdx].initialCode ?? INITIAL_CODE;
+    // Replace doc only when the code content actually changes
+    const nextCode = lvlReset.initialCode ?? INITIAL_CODE;
     const curCode  = view.state.doc.toString();
     if (nextCode !== curCode) {
       view.dispatch({
@@ -545,10 +595,16 @@ export default function App() {
       });
     }
 
-    // 3. Restore focus so the player never needs to touch the mouse.
-    //    rAF ensures the React render cycle has committed before we focus.
+    // 引擎级支持：如果关卡配置了初始光标位置，则自动将光标传送过去
+    if (lvlReset.initialCursor) {
+      try {
+        const pos = view.state.doc.line(lvlReset.initialCursor.row + 1).from + lvlReset.initialCursor.col;
+        view.dispatch({ selection: { anchor: pos } });
+      } catch { /* 忽略越界错误 */ }
+    }
+
     requestAnimationFrame(() => { view.focus(); });
-  }, [levelIdx]);
+  }, [showIntro, levelIdx]);
 
   // ── Bullet-proof vim-mode-change listener ─────────────────────────────────
   // Runs AFTER paint (useEffect, not useLayoutEffect) so the CM5 adapter is
@@ -724,8 +780,27 @@ export default function App() {
 
       {/* Success overlay */}
       {success && (
+
         <div className="success-flash" aria-live="polite">
           {isLastLevel ? '🏆 全部通关！恭喜掌握 Vim 核心！' : `✅ Level ${levelIdx + 1} 完成！`}
+        </div>
+      )}
+
+      {/* + 新关卡技能解锁弹窗 */}
+      {showIntro && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)' }} onClick={() => { setShowIntro(false); requestAnimationFrame(() => editorViewRef.current?.focus()); }}>
+          <div style={{ background: '#0d0d0d', border: '1px solid #58A6FF', borderRadius: '8px', padding: '40px 50px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', boxShadow: '0 0 40px rgba(88, 166, 255, 0.15)', maxWidth: '550px', animation: 'scale-in 0.2s ease-out' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: '12px', color: '#858585', textTransform: 'uppercase', letterSpacing: '3px', fontWeight: 600 }}>Level {levelIdx + 1}</div>
+            <div style={{ fontSize: '26px', color: '#FFFFFF', fontWeight: 700, textAlign: 'center', marginTop: '4px' }}>
+              解锁新操作：<span style={{ color: '#58A6FF', fontFamily: '"JetBrains Mono", monospace', marginLeft: '8px', padding: '2px 10px', background: 'rgba(88,166,255,0.1)', borderRadius: '6px' }}>{level.keys}</span>
+            </div>
+            <div style={{ fontSize: '15px', color: '#d4d4d4', lineHeight: '1.7', textAlign: 'center', marginTop: '12px' }}>
+              {level.instruction}
+            </div>
+            <div style={{ marginTop: '30px', fontSize: '13px', color: '#58A6FF', fontWeight: 600, padding: '8px 24px', border: '1px solid rgba(88, 166, 255, 0.4)', borderRadius: '4px', background: 'rgba(88, 166, 255, 0.08)', animation: 'ghost-pulse 2s infinite' }}>
+              [ 按任意键进入战场 ]
+            </div>
+          </div>
         </div>
       )}
 
