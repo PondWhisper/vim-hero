@@ -240,11 +240,12 @@ const LEVELS: LevelSchema[] = [
   },
 
   // ── L6 Precision ─────────────────────────────────────────────────────────
+  // ── L6 Precision ─────────────────────────────────────────────────────────
   // L6_CODE has "phivot" typo on row=6 col=8. Fix to "pivot" efficiently.
   {
     id: 6, minSteps: 6,
     videoUrl: undefined,
-    keys: 'ciw  cw  x',
+    keys: 'x',
     commands: [
       { key: 'x',   desc: '删除光标下的单个字符',     category: '删改' },
       { key: 'cw',  desc: '删除到词尾并进入 Insert',   category: '删改' },
@@ -252,10 +253,10 @@ const LEVELS: LevelSchema[] = [
       { key: 'Esc', desc: '返回 Normal 模式',           category: '模式切换' },
     ],
     instruction:
-      '第 7 行藏了个 Bug：phivot → 应为 pivot！' +
-      '用最少步数修正，熵值超标代码将变模糊。',
+      '第 7 行藏了个 Bug：phivot 多了一个 h！\n' +
+      '目标：导航到第 7 行，将光标放在多余的 h 上（狙击圈处），按下 x 直接删除光标下的字符。',
     initialCode: L6_CODE,
-    target: { row: 6, col: 8 },
+    target: { row: 6, col: 9 }, // 👈 关键修改：从 col 8 (p) 移动到 col 9 (h)
     validate: (snap, mode) =>
       mode === 'normal' &&
       snap.code.includes('int pivot = arr[high]') &&
@@ -299,16 +300,20 @@ const LEVELS: LevelSchema[] = [
       { key: '$', desc: '跳到行尾', category: '行跳跃' },
     ],
     instruction:
-      '行内跳跃：0 跳到绝对行首，^ 跳到首个非空字符，$ 跳到行尾。\n' +
-      '目标：依次按 ^, $, 0 感受光标的瞬间移动，最终回到绝对行首通关。',
-    initialCode: '    const isComplete = false;',
-    initialCursor: { row: 0, col: 10 },
-    target: { row: 0, col: 0 },
-    validate: (snap, mode, ctx) => ctx.current.step === 3 && mode === 'normal',
+      '行内跳跃：0 行首，^ 首个非空字符，$ 行尾。\n' +
+      '目标：光标在第 36 行（数组声明处），依次按 ^, $, 0，感受瞬间移动，最终回到绝对行首通关。',
+    initialCursor: { row: 35, col: 15 },
+    // 使用 targets 数组实现航点接力
+    targets: [
+      { row: 35, col: 4 },   // 第一步：^ 跳到首个非空字符 'i'
+      { row: 35, col: 44 },  // 第二步：$ 跳到行尾 ';'
+      { row: 35, col: 0 }    // 第三步：0 跳回绝对行首
+    ],
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 0 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === '^') ctx.current.step = 1;
-      if (e.key === '$') ctx.current.step = 2;
-      if (e.key === '0') ctx.current.step = 3;
+      if (ctx.current.step === 1 && e.key === '$') ctx.current.step = 2;
+      if (ctx.current.step === 2 && e.key === '0') ctx.current.step = 3;
     }
   },
 
@@ -321,36 +326,38 @@ const LEVELS: LevelSchema[] = [
       { key: ';', desc: '重复上次查找', category: '行内搜索' },
     ],
     instruction:
-      '狙击手模式：f + 字符可以向右精准查找到目标。\n' +
-      '目标：按 f 然后 m 跳到 formatName 的 m 上，再按 ; 跳到第二个 m 上即可通关。',
-    initialCode: 'function formatName(first, last)',
-    initialCursor: { row: 0, col: 0 },
-    target: { row: 0, col: 17 },
-    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 17 && mode === 'normal',
+      '狙击手模式：f + 字符可以向右精准查找。\n' +
+      '目标：光标在第 29 行，按 f 然后 a 跳到 printArray 的 a，再按 ; 重复狙击，跳到 arr 的 a 上即可通关。',
+    initialCursor: { row: 28, col: 0 },
+    // 使用 targets 数组引导玩家的两次连续查找
+    targets: [
+      { row: 28, col: 13 }, // 第一步：fa 命中 printArray 的 a
+      { row: 28, col: 20 }  // 第二步：; 命中 arr 的 a
+    ],
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 20 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === 'f') ctx.current.step = 1;
-      if (e.key === 'm') ctx.current.step = 2;
-      if (e.key === ';') ctx.current.step = 3;
+      if (ctx.current.step === 1 && e.key === 'a') ctx.current.step = 2;
+      if (ctx.current.step === 2 && e.key === ';') ctx.current.step = 3;
     }
   },
 
   // ── L10: Till Character ──────────────────────────────────────────────────
   {
     id: 10, minSteps: 2,
-    keys: 't  ;',
+    keys: 't  "',
     commands: [
       { key: 't', desc: '跳到字符前一格', category: '行内搜索' },
     ],
     instruction:
-      '贴身逼近：t 停在目标字符的前一格（Till），常用于修改引号内内容。\n' +
-      '目标：按 t 然后 " 停在末尾引号的前一格（即 m 上）。',
-    initialCode: 'let url = "https://example.com";',
-    initialCursor: { row: 0, col: 11 },
-    target: { row: 0, col: 29 },
-    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 29 && mode === 'normal',
+      '贴身逼近：t (Till) 停在目标字符的前一格。\n' +
+      '目标：光标在第 38 行 cout 处，按 t 然后 " ，精确停在第一个引号前面的空格上。',
+    initialCursor: { row: 37, col: 4 },
+    target: { row: 37, col: 11 },
+    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 11 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === 't') ctx.current.step = 1;
-      if (e.key === '"') ctx.current.step = 2;
+      if (ctx.current.step === 1 && e.key === '"') ctx.current.step = 2;
     }
   },
 
@@ -363,11 +370,10 @@ const LEVELS: LevelSchema[] = [
       { key: 'w', desc: '按词跳转',   category: '组合操作' },
     ],
     instruction:
-      'Vim 的语法魔法：操作符 (Operator) + 动作 (Motion)。\n' +
-      '目标：d 是删除，w 是跳到下个词首。在 useless 的 u 上按 dw 删掉这个单词。',
-    initialCode: 'const ugly useless variable = 1;',
-    initialCursor: { row: 0, col: 11 },
-    validate: (snap, mode) => snap.code.includes('const ugly variable = 1;') && mode === 'normal',
+      '魔法连招：操作符 (d) + 动作 (w)。\n' +
+      '目标：光标在第 29 行的第二个 int 上。按 dw 删掉这个类型的声明字眼！',
+    initialCursor: { row: 28, col: 27 },
+    validate: (snap, mode) => snap.code.includes('void printArray(int arr[], size) {') && mode === 'normal',
   },
 
   // ── L12: Change Word ─────────────────────────────────────────────────────
@@ -380,11 +386,10 @@ const LEVELS: LevelSchema[] = [
       { key: 'Esc', desc: '退回 Normal 模式',             category: '模式切换' },
     ],
     instruction:
-      '终极连招：c (Change) 相当于 d + i，删掉目标并立刻切入 Insert 模式。\n' +
-      '目标：在 pending 的 p 上按 cw，输入 done，然后按 Esc 退出。',
-    initialCode: 'let status = "pending";',
-    initialCursor: { row: 0, col: 14 },
-    validate: (snap, mode) => snap.code.includes('let status = "done";') && mode === 'normal',
+      '修改词语：c (Change) = d + i，删除并立刻切入 Insert 模式。\n' +
+      '目标：光标在第 35 行 main 函数名上，按 cw 将其改为 init，按 Esc 退出。',
+    initialCursor: { row: 34, col: 4 },
+    validate: (snap, mode) => snap.code.includes('int init() {') && mode === 'normal',
   },
 
   // ── L13: Delete Line ─────────────────────────────────────────────────────
@@ -395,11 +400,10 @@ const LEVELS: LevelSchema[] = [
       { key: 'dd', desc: '删除整行', category: '行操作' },
     ],
     instruction:
-      '双击操作符：当操作符连续按两次（如 dd），它将直接作用于当前整行。\n' +
-      '目标：光标在 console.log 行，连按两次 d 删掉这整行代码。',
-    initialCode: 'function init() {\n  console.log("Delete this debug line");\n  start();\n}',
-    initialCursor: { row: 1, col: 5 },
-    validate: (snap, mode) => snap.lineCount === 3 && !snap.code.includes('console.log') && mode === 'normal',
+      '双击操作符：当操作符连续按两次（dd），它将直接作用于当前整行。\n' +
+      '目标：光标在第 32 行 cout << endl;，连按两次 d 直接删掉这行打印。',
+    initialCursor: { row: 31, col: 4 },
+    validate: (snap, mode) => !snap.code.includes('cout << endl;') && mode === 'normal',
   },
 
   // ── L14: Copy & Paste ────────────────────────────────────────────────────
@@ -412,10 +416,12 @@ const LEVELS: LevelSchema[] = [
     ],
     instruction:
       '代码克隆术：y 是复制 (Yank)，p 是在光标后粘贴 (Put)。\n' +
-      '目标：按 yy 复制当前行，按 p 在下方粘贴出第二行即可通关。',
-    initialCode: 'const arr1 = [1, 2, 3];',
-    initialCursor: { row: 0, col: 0 },
-    validate: (snap, mode) => snap.lineCount === 2 && snap.code.split('\n')[0] === snap.code.split('\n')[1] && mode === 'normal',
+      '目标：光标在第 39 行 printArray 上，按 yy 复制，按 p 在下方粘贴出额外的一行。',
+    initialCursor: { row: 38, col: 4 },
+    validate: (snap, mode) => {
+      const matches = snap.code.match(/printArray\(arr, n\);/g);
+      return matches !== null && matches.length >= 3 && mode === 'normal';
+    }
   }
 ];
 
