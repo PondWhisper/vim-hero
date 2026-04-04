@@ -295,9 +295,10 @@ interface CommandSidebarProps {
   commands?: VimCommand[];
   levelKeys: string;
   levelId: number;
+  instruction?: string; // + 新增
 }
 
-function CommandSidebar({ commands, levelKeys, levelId }: CommandSidebarProps) {
+function CommandSidebar({ commands, levelKeys, levelId, instruction }: CommandSidebarProps) {
   const groups = commands
     ? commands.reduce<Record<string, VimCommand[]>>((acc, cmd) => {
         const cat = cmd.category ?? '指令';
@@ -307,23 +308,35 @@ function CommandSidebar({ commands, levelKeys, levelId }: CommandSidebarProps) {
     : null;
 
   return (
-    <aside className="command-sidebar">
-      <div className="sidebar-header">Level {levelId} 指令速查</div>
-      {groups ? (
-        Object.entries(groups).map(([cat, cmds]) => (
-          <div key={cat} className="cmd-group">
-            <div className="cmd-group-label">{cat}</div>
-            {cmds.map(cmd => (
-              <div key={cmd.key} className="cmd-row">
-                <kbd className="vim-key">{cmd.key}</kbd>
-                <span className="cmd-desc">{cmd.desc}</span>
-              </div>
-            ))}
-          </div>
-        ))
-      ) : (
-        <div className="cmd-fallback">{levelKeys}</div>
+    <aside className="command-sidebar" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="sidebar-header">Level {levelId} 任务目标</div>
+      
+      {/* + 任务说明区域：常驻显示，方便玩家随时查看 */}
+      {instruction && (
+        <div style={{ padding: '14px', borderBottom: '1px solid #1e1e1e', fontSize: '13px', color: '#F0F6FC', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontWeight: 500 }}>
+          {instruction}
+        </div>
       )}
+
+      <div className="sidebar-header" style={{ borderTop: instruction ? 'none' : '1px solid #1e1e1e' }}>指令速查</div>
+      
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {groups ? (
+          Object.entries(groups).map(([cat, cmds]) => (
+            <div key={cat} className="cmd-group">
+              <div className="cmd-group-label">{cat}</div>
+              {cmds.map(cmd => (
+                <div key={cmd.key} className="cmd-row">
+                  <kbd className="vim-key">{cmd.key}</kbd>
+                  <span className="cmd-desc">{cmd.desc}</span>
+                </div>
+              ))}
+            </div>
+          ))
+        ) : (
+          <div className="cmd-fallback">{levelKeys}</div>
+        )}
+      </div>
     </aside>
   );
 }
@@ -786,20 +799,24 @@ export default function App() {
         </div>
       )}
 
-      {/* + 新关卡技能解锁弹窗 */}
+      {/* + 重构后的新技能解锁弹窗 UI：透明、不挡代码 */}
       {showIntro && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(6px)' }} onClick={() => { setShowIntro(false); requestAnimationFrame(() => editorViewRef.current?.focus()); }}>
-          <div style={{ background: '#0d0d0d', border: '1px solid #58A6FF', borderRadius: '8px', padding: '40px 50px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', boxShadow: '0 0 40px rgba(88, 166, 255, 0.15)', maxWidth: '550px', animation: 'scale-in 0.2s ease-out' }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: '12px', color: '#858585', textTransform: 'uppercase', letterSpacing: '3px', fontWeight: 600 }}>Level {levelIdx + 1}</div>
-            <div style={{ fontSize: '26px', color: '#FFFFFF', fontWeight: 700, textAlign: 'center', marginTop: '4px' }}>
-              解锁新操作：<span style={{ color: '#58A6FF', fontFamily: '"JetBrains Mono", monospace', marginLeft: '8px', padding: '2px 10px', background: 'rgba(88,166,255,0.1)', borderRadius: '6px' }}>{level.keys}</span>
+        <div style={{ position: 'fixed', inset: 0, background: 'transparent', zIndex: 150, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '15vh' }} onClick={() => { setShowIntro(false); requestAnimationFrame(() => editorViewRef.current?.focus()); }}>
+          <div style={{ background: 'rgba(13, 13, 13, 0.95)', border: '1px solid rgba(88, 166, 255, 0.5)', borderRadius: '8px', padding: '25px 40px', display: 'flex', alignItems: 'center', gap: '30px', boxShadow: '0 20px 40px rgba(0,0,0,0.5), 0 0 20px rgba(88, 166, 255, 0.15)', animation: 'slide-down 0.2s ease-out' }} onClick={e => e.stopPropagation()}>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 600 }}>Level {levelIdx + 1}</div>
+              <div style={{ fontSize: '20px', color: '#FFFFFF', fontWeight: 700 }}>解锁新操作</div>
+              {/* 简化了弹窗内的文字，因为右侧已经有了详细说明 */}
+              <div style={{ marginTop: '12px', fontSize: '12px', color: '#58A6FF', fontWeight: 600, animation: 'ghost-pulse 2s infinite' }}>
+                [ 按任意键开始 ]
+              </div>
             </div>
-            <div style={{ fontSize: '15px', color: '#d4d4d4', lineHeight: '1.7', textAlign: 'center', marginTop: '12px' }}>
-              {level.instruction}
+
+            <div style={{ flexShrink: 0 }}>
+              <span style={{ color: '#58A6FF', fontFamily: '"JetBrains Mono", monospace', fontWeight: 700, fontSize: '32px', padding: '8px 16px', background: 'rgba(88,166,255,0.1)', borderRadius: '8px', display: 'inline-block', border: '1px solid rgba(88,166,255,0.3)' }}>{level.keys}</span>
             </div>
-            <div style={{ marginTop: '30px', fontSize: '13px', color: '#58A6FF', fontWeight: 600, padding: '8px 24px', border: '1px solid rgba(88, 166, 255, 0.4)', borderRadius: '4px', background: 'rgba(88, 166, 255, 0.08)', animation: 'ghost-pulse 2s infinite' }}>
-              [ 按任意键进入战场 ]
-            </div>
+
           </div>
         </div>
       )}
@@ -931,6 +948,7 @@ export default function App() {
             commands={level.commands}
             levelKeys={level.keys}
             levelId={levelIdx + 1}
+            instruction={level.instruction || (level as any).taskDescription} // + 传入文字
           />
         </Panel>
 
