@@ -25,7 +25,7 @@ export interface LevelConfig {
 
   // ── Content ──────────────────────────────────────────────────────────────
   initialCode:     string;        // editor content when this level starts (required)
-  taskDescription: string;        // player-facing instructions
+  instruction:     string;        // player-facing instructions
   targetCode?:     string;        // if set, used for automatic win detection
 
   // ── Cursor placement ──────────────────────────────────────────────────────
@@ -55,11 +55,11 @@ export interface LevelConfig {
   validate?: (
     snap: EditorSnapshot,
     mode: VimMode,
-    ctx:  { current: Record<string, any> }
+    ctx:  { current: Record<string, unknown> }
   ) => boolean;
   onKeyDown?: (
     e:         KeyboardEvent,
-    ctx:       { current: Record<string, any> },
+    ctx:       { current: Record<string, unknown> },
     showToast: (msg: string) => void
   ) => void;
 }
@@ -68,13 +68,64 @@ export interface LevelConfig {
 // These are minimal scaffold levels to verify engine wiring.
 // Replace with real level designs when ready.
 
-const SCAFFOLD_CODE = `// Vim Hero — 关卡占位代码
-// 请在 src/config/levels.ts 中替换为真实关卡内容
+// ─── Shared C++ QuickSort buffer (L4–L7 in the old system, kept for migration) ─
+// idx 0:  #include <iostream>
+// idx 6:  "    int pivot = arr[high];"  → 'pivot' @ col 8
+// idx 8:  "    for (int j = low; j < high; j++) {"  → 'j' @ col 13
+// idx 11: "            swap(arr[i], arr[j]);"  → 'swap' @ col 12
+export const INITIAL_CODE = `#include <iostream>
+using namespace std;
+
+// 快速排序核心：分区函数
+// 将数组分为两部分，左边<=pivot，右边>pivot
+int partition(int arr[], int low, int high) {
+    int pivot = arr[high];  // 选最右元素作为基准
+    int i = low - 1;
+    for (int j = low; j < high; j++) {
+        if (arr[j] <= pivot) {
+            i++;
+            swap(arr[i], arr[j]);
+        }
+    }
+    swap(arr[i + 1], arr[high]);
+    return i + 1;
+}
+
+// 递归快速排序函数
+void quickSort(int arr[], int low, int high) {
+    if (low < high) {
+        int pi = partition(arr, low, high);
+        quickSort(arr, low, pi - 1);
+        quickSort(arr, pi + 1, high);
+    }
+}
+
+// 打印数组
+void printArray(int arr[], int size) {
+    for (int i = 0; i < size; i++)
+        cout << arr[i] << " ";
+    cout << endl;
+}
 
 int main() {
-    int x = 0;
-    return x;
+    int arr[] = {64, 34, 25, 12, 22, 11, 90};
+    int n = sizeof(arr) / sizeof(arr[0]);
+    cout << "原始数组: ";
+    printArray(arr, n);
+    quickSort(arr, 0, n - 1);
+    cout << "排序结果: ";
+    printArray(arr, n);
+    return 0;
 }`;
+
+// L6 has "phivot" typo on idx=6 — player must fix to "pivot"
+export const L6_CODE = INITIAL_CODE.replace(
+  '    int pivot = arr[high];  // 选最右元素作为基准',
+  '    int phivot = arr[high];  // 选最右元素作为基准'
+);
+
+// Line idx=4: "// 将数组分为两部分，左边<=pivot，右边>pivot" — last char col
+export const L4_END_COL = INITIAL_CODE.split('\n')[4].length - 1;
 
 // ─── Level 1 Buffer: realistic tailwind.config.js (200 lines) ────────────────
 // Row 100 (0-indexed) is the "module.exports = {" closing brace area —
@@ -792,16 +843,13 @@ export const VIM_LEVELS: LevelConfig[] = [
     initialCursor: { row: 9, col: 5 },
     // Ghost cursor marks the insertion point inside the rem() function body.
     target: { row: 9, col: 5 },
-    taskDescription:
-      '在大型代码库中，Normal 模式是你的战术视图。\n' +
+    instruction:
+      'Vim 的灵魂是"模式"。\n' +
       '① 按 i 进入 Insert 模式（光标变细线）\n' +
-      '② 在光标处输入 hello vim!\n' +
-      '③ 按 Esc 返回 Normal 模式（光标变方块）\n' +
-      '缓冲区中出现 "hello vim!" 并回到 Normal 模式即可通关。',
+      '② 按 Esc 返回 Normal 模式（光标变方块）\n' +
+      '完成一次完美的模式切换即可通关！',
     validate: (snap, mode, ctx) => {
-      if (!ctx.current.seenInsertToNormal) return false;
-      if (mode !== 'normal') return false;
-      return snap.code.includes('hello vim!');
+      return ctx.current.seenInsertToNormal === true && mode === 'normal';
     },
   },
 
@@ -818,7 +866,7 @@ export const VIM_LEVELS: LevelConfig[] = [
     initialCode:   L2_COMPASS_BUFFER,
     initialCursor: { row: 0, col: 0 },
     target: { row: 44, col: 11 },
-    taskDescription:
+    instruction:
       '禁止使用方向键！按方向键会触发红色警报。\n' +
       '只用 h / j / k / l 将光标导航到第 45 行第 12 列：\n' +
       'router.get 中 "get" 的 "g"（高亮青色光标处）。\n' +
@@ -844,7 +892,7 @@ export const VIM_LEVELS: LevelConfig[] = [
       anchorText:   'export const useVimEngine',
       anchorOffset: 13,
     },
-    taskDescription:
+    instruction:
       '单词跳跃时代！\n' +
       '光标位于第 29 行 State 接口的 done 字段。\n' +
       '目标：用 w / e / b 跳跃到第 61 行 useVimEngine 函数名处（高亮青色 u）。\n' +
@@ -865,4 +913,244 @@ export const VIM_LEVELS: LevelConfig[] = [
       return snap.col === 13 && line.startsWith('export const useVimEngine');
     },
   },
+
+  // ── L4: Boundary — 0, ^, $ on the long Chinese comment at (row 4) ───────────
+  {
+    id:    4,
+    title: 'Boundary',
+    keys:  '0  ^  $',
+    optimalSteps: 4,
+    commands: [
+      { key: '0', desc: '跳到行首（第 0 列）', category: '行跳跃' },
+      { key: '^', desc: '跳到行首非空字符',     category: '行跳跃' },
+      { key: '$', desc: '跳到行尾',             category: '行跳跃' },
+    ],
+    initialCode: INITIAL_CODE,
+    targets: [{ row: 4, col: 0 }, { row: 4, col: L4_END_COL }],
+    instruction:
+      '用 0 跳到行首（第 0 列），^ 跳到行首第一个非空字符，$ 跳到行尾。\n' +
+      '移到第 5 行长注释上，三个键都用过才算通关！',
+    onKeyDown: (e, ctx) => {
+      if (e.key === '0') ctx.current.used0      = true;
+      if (e.key === '^') ctx.current.usedHat    = true;
+      if (e.key === '$') ctx.current.usedDollar = true;
+    },
+    validate: (snap, _mode, ctx) =>
+      snap.line === 4 &&
+      ctx.current.used0      === true &&
+      ctx.current.usedHat    === true &&
+      ctx.current.usedDollar === true,
+  },
+
+  // ── L5: Rift — o (open below) and O (open above) ─────────────────────────
+  {
+    id:    5,
+    title: 'Rift',
+    keys:  'o  O',
+    optimalSteps: 4,
+    commands: [
+      { key: 'o',   desc: '下方开辟新行并进入 Insert', category: '新建行' },
+      { key: 'O',   desc: '上方开辟新行并进入 Insert', category: '新建行' },
+      { key: 'Esc', desc: '返回 Normal 模式',           category: '模式切换' },
+    ],
+    initialCode: INITIAL_CODE,
+    instruction:
+      '用 o 在当前行下方开辟新行，O 在上方开辟新行，再按 Esc 回 Normal。\n' +
+      '两种都必须用过才算通关。',
+    onKeyDown: (e, ctx) => {
+      if (e.key === 'o') ctx.current.usedO    = true;
+      if (e.key === 'O') ctx.current.usedBigO = true;
+    },
+    validate: (snap, mode, ctx) =>
+      mode === 'normal' &&
+      snap.lineCount > INITIAL_CODE.split('\n').length + 1 &&
+      ctx.current.usedO    === true &&
+      ctx.current.usedBigO === true,
+  },
+
+  // ── L6: Precision — fix "phivot" typo → "pivot" ──────────────────────────
+  {
+    id:    6,
+    title: 'Precision',
+    keys:  'ciw  cw  x',
+    optimalSteps: 6,
+    commands: [
+      { key: 'x',   desc: '删除光标下的单个字符',     category: '删改' },
+      { key: 'cw',  desc: '删除到词尾并进入 Insert',   category: '删改' },
+      { key: 'ciw', desc: '删除整个单词并进入 Insert', category: '删改' },
+      { key: 'Esc', desc: '返回 Normal 模式',           category: '模式切换' },
+    ],
+    initialCode: L6_CODE,
+    target: { row: 6, col: 8 },
+    instruction:
+      '第 7 行藏了个 Bug：phivot → 应为 pivot！\n' +
+      '用最少步数修正，熵值超标代码将变模糊。',
+    validate: (snap, mode) =>
+      mode === 'normal' &&
+      snap.code.includes('int pivot = arr[high]') &&
+      !snap.code.includes('phivot'),
+  },
+
+  // ── L7: Alchemist — semantic navigation to swap() call ───────────────────
+  // Target: 's' of swap(arr[i], arr[j]) at row=11, col=12
+  {
+    id:    7,
+    title: 'Alchemist',
+    keys:  'w  b  f  /n',
+    optimalSteps: 8,
+    commands: [
+      { key: 'w',      desc: '跳到下一词首',         category: '语义跳跃' },
+      { key: 'b',      desc: '跳到上一词首',         category: '语义跳跃' },
+      { key: 'f{c}',  desc: '跳到行内下一个字符 c', category: '语义跳跃' },
+      { key: '/{pat}', desc: '向下搜索模式',         category: '搜索' },
+      { key: 'n',      desc: '跳到下一个搜索匹配',   category: '搜索' },
+    ],
+    initialCode: INITIAL_CODE,
+    target: { row: 11, col: 12 },
+    instruction:
+      '终极效率！用语义跳跃（w/b/f/n）冲向第 12 行的 swap(arr[i], arr[j])。\n' +
+      '方向键触发 +20 熵值处罚，代码立即模糊！',
+    onKeyDown(e, _ctx, showToast) {
+      if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) {
+        showToast('⚡ 方向键处罚！+20 熵值，代码进入深度模糊！');
+      }
+    },
+    validate: (snap) => snap.line === 11 && snap.col === 12,
+  },
+
+  // ── L8: Line Boundaries ──────────────────────────────────────────────────
+  {
+    id: 8, minSteps: 3,
+    title: 'Line Boundaries',
+    keys: '0  ^  $',
+    commands: [
+      { key: '0', desc: '跳到绝对行首', category: '行跳跃' },
+      { key: '^', desc: '跳首个非空字符', category: '行跳跃' },
+      { key: '$', desc: '跳到行尾', category: '行跳跃' },
+    ],
+    taskDescription:
+      '行内跳跃：0 跳到绝对行首，^ 跳到首个非空字符，$ 跳到行尾。\n' +
+      '目标：依次按 ^, $, 0 感受光标的瞬间移动，最终回到绝对行首通关。',
+    initialCode: '    const isComplete = false;',
+    initialCursor: { row: 0, col: 10 },
+    target: { row: 0, col: 0 },
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === '^') ctx.current.step = 1;
+      if (e.key === '$') ctx.current.step = 2;
+      if (e.key === '0') ctx.current.step = 3;
+    }
+  },
+
+  // ── L9: Inline Sniper ────────────────────────────────────────────────────
+  {
+    id: 9, minSteps: 3,
+    title: 'Inline Sniper',
+    keys: 'f  ;',
+    commands: [
+      { key: 'f', desc: '向右查找字符', category: '行内搜索' },
+      { key: ';', desc: '重复上次查找', category: '行内搜索' },
+    ],
+    taskDescription:
+      '狙击手模式：f + 字符可以向右精准查找到目标。\n' +
+      '目标：按 f 然后 m 跳到 formatName 的 m 上，再按 ; 跳到第二个 m 上即可通关。',
+    initialCode: 'function formatName(first, last)',
+    initialCursor: { row: 0, col: 0 },
+    target: { row: 0, col: 17 },
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 17 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === 'f') ctx.current.step = 1;
+      if (e.key === 'm') ctx.current.step = 2;
+      if (e.key === ';') ctx.current.step = 3;
+    }
+  },
+
+  // ── L10: Till Character ──────────────────────────────────────────────────
+  {
+    id: 10, minSteps: 2,
+    title: 'Till Character',
+    keys: 't  ;',
+    commands: [
+      { key: 't', desc: '跳到字符前一格', category: '行内搜索' },
+    ],
+    taskDescription:
+      '贴身逼近：t 停在目标字符的前一格（Till），常用于修改引号内内容。\n' +
+      '目标：按 t 然后 " 停在末尾引号的前一格（即 m 上）。',
+    initialCode: 'let url = "https://example.com";',
+    initialCursor: { row: 0, col: 11 },
+    target: { row: 0, col: 29 },
+    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 29 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === 't') ctx.current.step = 1;
+      if (e.key === '"') ctx.current.step = 2;
+    }
+  },
+
+  // ── L11: Delete Word ─────────────────────────────────────────────────────
+  {
+    id: 11, minSteps: 2,
+    title: 'Delete Word',
+    keys: 'd  w',
+    commands: [
+      { key: 'd', desc: '删除操作符', category: '组合操作' },
+      { key: 'w', desc: '按词跳转',   category: '组合操作' },
+    ],
+    taskDescription:
+      'Vim 的语法魔法：操作符 (Operator) + 动作 (Motion)。\n' +
+      '目标：d 是删除，w 是跳到下个词首。在 useless 的 u 上按 dw 删掉这个单词。',
+    initialCode: 'const ugly useless variable = 1;',
+    initialCursor: { row: 0, col: 11 },
+    validate: (snap, mode) => snap.code === 'const ugly variable = 1;' && mode === 'normal',
+  },
+
+  // ── L12: Change Word ─────────────────────────────────────────────────────
+  {
+    id: 12, minSteps: 7,
+    title: 'Change Word',
+    keys: 'c  w',
+    commands: [
+      { key: 'c',   desc: '修改操作符 (删除并进Insert)', category: '组合操作' },
+      { key: 'w',   desc: '按词跳转',                     category: '组合操作' },
+      { key: 'Esc', desc: '退回 Normal 模式',             category: '模式切换' },
+    ],
+    taskDescription:
+      '终极连招：c (Change) 相当于 d + i，删掉目标并立刻切入 Insert 模式。\n' +
+      '目标：在 pending 的 p 上按 cw，输入 done，然后按 Esc 退出。',
+    initialCode: 'let status = "pending";',
+    initialCursor: { row: 0, col: 14 },
+    validate: (snap, mode) => snap.code === 'let status = "done";' && mode === 'normal',
+  },
+
+  // ── L13: Delete Line ─────────────────────────────────────────────────────
+  {
+    id: 13, minSteps: 2,
+    title: 'Delete Line',
+    keys: 'd  d',
+    commands: [
+      { key: 'dd', desc: '删除整行', category: '行操作' },
+    ],
+    taskDescription:
+      '双击操作符：当操作符连续按两次（如 dd），它将直接作用于当前整行。\n' +
+      '目标：光标在 console.log 行，连按两次 d 删掉这整行代码。',
+    initialCode: 'function init() {\n  console.log("Delete this debug line");\n  start();\n}',
+    initialCursor: { row: 1, col: 5 },
+    validate: (snap, mode) => snap.lineCount === 3 && !snap.code.includes('console.log') && mode === 'normal',
+  },
+
+  // ── L14: Copy & Paste ────────────────────────────────────────────────────
+  {
+    id: 14, minSteps: 3,
+    title: 'Copy & Paste',
+    keys: 'y  y  p',
+    commands: [
+      { key: 'yy', desc: '复制整行', category: '行操作' },
+      { key: 'p',  desc: '在下方粘贴', category: '行操作' },
+    ],
+    taskDescription:
+      '代码克隆术：y 是复制 (Yank)，p 是在光标后粘贴 (Put)。\n' +
+      '目标：按 yy 复制当前行，按 p 在下方粘贴出第二行即可通关。',
+    initialCode: 'const arr1 = [1, 2, 3];',
+    initialCursor: { row: 0, col: 0 },
+    validate: (snap, mode) => snap.lineCount === 2 && snap.code.split('\n')[0] === snap.code.split('\n')[1] && mode === 'normal',
+  }
 ];

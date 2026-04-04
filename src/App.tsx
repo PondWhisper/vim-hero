@@ -288,6 +288,135 @@ const LEVELS: LevelSchema[] = [
       }
     },
   },
+
+  // ── L8: Line Boundaries ──────────────────────────────────────────────────
+  {
+    id: 8, minSteps: 3,
+    keys: '0  ^  $',
+    commands: [
+      { key: '0', desc: '跳到绝对行首', category: '行跳跃' },
+      { key: '^', desc: '跳首个非空字符', category: '行跳跃' },
+      { key: '$', desc: '跳到行尾', category: '行跳跃' },
+    ],
+    instruction:
+      '行内跳跃：0 跳到绝对行首，^ 跳到首个非空字符，$ 跳到行尾。\n' +
+      '目标：依次按 ^, $, 0 感受光标的瞬间移动，最终回到绝对行首通关。',
+    initialCode: '    const isComplete = false;',
+    initialCursor: { row: 0, col: 10 },
+    target: { row: 0, col: 0 },
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === '^') ctx.current.step = 1;
+      if (e.key === '$') ctx.current.step = 2;
+      if (e.key === '0') ctx.current.step = 3;
+    }
+  },
+
+  // ── L9: Inline Sniper ────────────────────────────────────────────────────
+  {
+    id: 9, minSteps: 3,
+    keys: 'f  ;',
+    commands: [
+      { key: 'f', desc: '向右查找字符', category: '行内搜索' },
+      { key: ';', desc: '重复上次查找', category: '行内搜索' },
+    ],
+    instruction:
+      '狙击手模式：f + 字符可以向右精准查找到目标。\n' +
+      '目标：按 f 然后 m 跳到 formatName 的 m 上，再按 ; 跳到第二个 m 上即可通关。',
+    initialCode: 'function formatName(first, last)',
+    initialCursor: { row: 0, col: 0 },
+    target: { row: 0, col: 17 },
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 17 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === 'f') ctx.current.step = 1;
+      if (e.key === 'm') ctx.current.step = 2;
+      if (e.key === ';') ctx.current.step = 3;
+    }
+  },
+
+  // ── L10: Till Character ──────────────────────────────────────────────────
+  {
+    id: 10, minSteps: 2,
+    keys: 't  ;',
+    commands: [
+      { key: 't', desc: '跳到字符前一格', category: '行内搜索' },
+    ],
+    instruction:
+      '贴身逼近：t 停在目标字符的前一格（Till），常用于修改引号内内容。\n' +
+      '目标：按 t 然后 " 停在末尾引号的前一格（即 m 上）。',
+    initialCode: 'let url = "https://example.com";',
+    initialCursor: { row: 0, col: 11 },
+    target: { row: 0, col: 29 },
+    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 29 && mode === 'normal',
+    onKeyDown(e, ctx) {
+      if (e.key === 't') ctx.current.step = 1;
+      if (e.key === '"') ctx.current.step = 2;
+    }
+  },
+
+  // ── L11: Delete Word ─────────────────────────────────────────────────────
+  {
+    id: 11, minSteps: 2,
+    keys: 'd  w',
+    commands: [
+      { key: 'd', desc: '删除操作符', category: '组合操作' },
+      { key: 'w', desc: '按词跳转',   category: '组合操作' },
+    ],
+    instruction:
+      'Vim 的语法魔法：操作符 (Operator) + 动作 (Motion)。\n' +
+      '目标：d 是删除，w 是跳到下个词首。在 useless 的 u 上按 dw 删掉这个单词。',
+    initialCode: 'const ugly useless variable = 1;',
+    initialCursor: { row: 0, col: 11 },
+    validate: (snap, mode) => snap.code.includes('const ugly variable = 1;') && mode === 'normal',
+  },
+
+  // ── L12: Change Word ─────────────────────────────────────────────────────
+  {
+    id: 12, minSteps: 7,
+    keys: 'c  w',
+    commands: [
+      { key: 'c',   desc: '修改操作符 (删除并进Insert)', category: '组合操作' },
+      { key: 'w',   desc: '按词跳转',                     category: '组合操作' },
+      { key: 'Esc', desc: '退回 Normal 模式',             category: '模式切换' },
+    ],
+    instruction:
+      '终极连招：c (Change) 相当于 d + i，删掉目标并立刻切入 Insert 模式。\n' +
+      '目标：在 pending 的 p 上按 cw，输入 done，然后按 Esc 退出。',
+    initialCode: 'let status = "pending";',
+    initialCursor: { row: 0, col: 14 },
+    validate: (snap, mode) => snap.code.includes('let status = "done";') && mode === 'normal',
+  },
+
+  // ── L13: Delete Line ─────────────────────────────────────────────────────
+  {
+    id: 13, minSteps: 2,
+    keys: 'd  d',
+    commands: [
+      { key: 'dd', desc: '删除整行', category: '行操作' },
+    ],
+    instruction:
+      '双击操作符：当操作符连续按两次（如 dd），它将直接作用于当前整行。\n' +
+      '目标：光标在 console.log 行，连按两次 d 删掉这整行代码。',
+    initialCode: 'function init() {\n  console.log("Delete this debug line");\n  start();\n}',
+    initialCursor: { row: 1, col: 5 },
+    validate: (snap, mode) => snap.lineCount === 3 && !snap.code.includes('console.log') && mode === 'normal',
+  },
+
+  // ── L14: Copy & Paste ────────────────────────────────────────────────────
+  {
+    id: 14, minSteps: 3,
+    keys: 'y  y  p',
+    commands: [
+      { key: 'yy', desc: '复制整行', category: '行操作' },
+      { key: 'p',  desc: '在下方粘贴', category: '行操作' },
+    ],
+    instruction:
+      '代码克隆术：y 是复制 (Yank)，p 是在光标后粘贴 (Put)。\n' +
+      '目标：按 yy 复制当前行，按 p 在下方粘贴出第二行即可通关。',
+    initialCode: 'const arr1 = [1, 2, 3];',
+    initialCursor: { row: 0, col: 0 },
+    validate: (snap, mode) => snap.lineCount === 2 && snap.code.split('\n')[0] === snap.code.split('\n')[1] && mode === 'normal',
+  }
 ];
 
 // ─── Command Sidebar ─────────────────────────────────────────────────────────
