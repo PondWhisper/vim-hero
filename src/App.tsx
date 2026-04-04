@@ -293,27 +293,26 @@ const LEVELS: LevelSchema[] = [
   // ── L8: Line Boundaries ──────────────────────────────────────────────────
   {
     id: 8, minSteps: 3,
-    keys: '0  ^  $',
+    keys: '$  0  ^',
     commands: [
       { key: '0', desc: '跳到绝对行首', category: '行跳跃' },
       { key: '^', desc: '跳首个非空字符', category: '行跳跃' },
       { key: '$', desc: '跳到行尾', category: '行跳跃' },
     ],
     instruction:
-      '行内跳跃：0 行首，^ 首个非空字符，$ 行尾。\n' +
-      '目标：光标在第 36 行（数组声明处），依次按 ^, $, 0，感受瞬间移动，最终回到绝对行首通关。',
-    initialCursor: { row: 35, col: 15 },
-    // 使用 targets 数组实现航点接力
+      '无缝连招开始！\n' +
+      '我们就近在第 15 行 (swap) 训练。依次按 $, 0, ^ 感受瞬间移动，最终回到行首的 s 上。',
+    initialCursor: { row: 14, col: 15 }, // 锚定在第15行，就在L7下方，视野绝对不丢失
     targets: [
-      { row: 35, col: 4 },   // 第一步：^ 跳到首个非空字符 'i'
-      { row: 35, col: 44 },  // 第二步：$ 跳到行尾 ';'
-      { row: 35, col: 0 }    // 第三步：0 跳回绝对行首
+      { row: 14, col: 31 }, // $ 跳到行尾分号
+      { row: 14, col: 0 },  // 0 跳到绝对行首
+      { row: 14, col: 4 }   // ^ 跳回到 s
     ],
-    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 0 && mode === 'normal',
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 4 && mode === 'normal',
     onKeyDown(e, ctx) {
-      if (e.key === '^') ctx.current.step = 1;
-      if (ctx.current.step === 1 && e.key === '$') ctx.current.step = 2;
-      if (ctx.current.step === 2 && e.key === '0') ctx.current.step = 3;
+      if (e.key === '$') ctx.current.step = 1;
+      if (e.key === '0') ctx.current.step = 2;
+      if (e.key === '^') ctx.current.step = 3;
     }
   },
 
@@ -326,38 +325,35 @@ const LEVELS: LevelSchema[] = [
       { key: ';', desc: '重复上次查找', category: '行内搜索' },
     ],
     instruction:
-      '狙击手模式：f + 字符可以向右精准查找。\n' +
-      '目标：光标在第 29 行，按 f 然后 a 跳到 printArray 的 a，再按 ; 重复狙击，跳到 arr 的 a 上即可通关。',
-    initialCursor: { row: 28, col: 0 },
-    // 使用 targets 数组引导玩家的两次连续查找
+      '狙击手模式（绝不重置光标！）：\n' +
+      '紧接上步，按 f 然后 a 狙击 swap 的 a，再按 ; 重复狙击 arr 的 a。',
     targets: [
-      { row: 28, col: 13 }, // 第一步：fa 命中 printArray 的 a
-      { row: 28, col: 20 }  // 第二步：; 命中 arr 的 a
+      { row: 14, col: 6 }, // swap 的 a
+      { row: 14, col: 9 }  // arr 的 a
     ],
-    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 20 && mode === 'normal',
+    validate: (snap, mode, ctx) => ctx.current.step === 3 && snap.col === 9 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === 'f') ctx.current.step = 1;
-      if (ctx.current.step === 1 && e.key === 'a') ctx.current.step = 2;
-      if (ctx.current.step === 2 && e.key === ';') ctx.current.step = 3;
+      if (e.key === 'a') ctx.current.step = 2;
+      if (e.key === ';') ctx.current.step = 3;
     }
   },
 
   // ── L10: Till Character ──────────────────────────────────────────────────
   {
     id: 10, minSteps: 2,
-    keys: 't  "',
+    keys: 't  +',
     commands: [
       { key: 't', desc: '跳到字符前一格', category: '行内搜索' },
     ],
     instruction:
-      '贴身逼近：t (Till) 停在目标字符的前一格。\n' +
-      '目标：光标在第 38 行 cout 处，按 t 然后 " ，精确停在第一个引号前面的空格上。',
-    initialCursor: { row: 37, col: 4 },
-    target: { row: 37, col: 11 },
-    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 11 && mode === 'normal',
+      '贴身逼近：\n' +
+      '按 t 然后 + ，精确停在 + 前面的空格上。',
+    target: { row: 14, col: 14 },
+    validate: (snap, mode, ctx) => ctx.current.step === 2 && snap.col === 14 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === 't') ctx.current.step = 1;
-      if (ctx.current.step === 1 && e.key === '"') ctx.current.step = 2;
+      if (e.key === '+') ctx.current.step = 2;
     }
   },
 
@@ -370,10 +366,10 @@ const LEVELS: LevelSchema[] = [
       { key: 'w', desc: '按词跳转',   category: '组合操作' },
     ],
     instruction:
-      '魔法连招：操作符 (d) + 动作 (w)。\n' +
-      '目标：光标在第 29 行的第二个 int 上。按 dw 删掉这个类型的声明字眼！',
-    initialCursor: { row: 28, col: 27 },
-    validate: (snap, mode) => snap.code.includes('void printArray(int arr[], size) {') && mode === 'normal',
+      '删除操作：\n' +
+      '光标刚好在空格上。按 dw 连同加号一起删掉它！',
+    target: { row: 14, col: 14 }, // 保持引导圈可见
+    validate: (snap, mode) => snap.code.includes('swap(arr[i 1]') && mode === 'normal',
   },
 
   // ── L12: Change Word ─────────────────────────────────────────────────────
@@ -386,24 +382,23 @@ const LEVELS: LevelSchema[] = [
       { key: 'Esc', desc: '退回 Normal 模式',             category: '模式切换' },
     ],
     instruction:
-      '修改词语：c (Change) = d + i，删除并立刻切入 Insert 模式。\n' +
-      '目标：光标在第 35 行 main 函数名上，按 cw 将其改为 init，按 Esc 退出。',
-    initialCursor: { row: 34, col: 4 },
-    validate: (snap, mode) => snap.code.includes('int init() {') && mode === 'normal',
+      '修改词语：\n' +
+      '光标现在落在了 1 上。按 cw 删掉它并进入插入模式，输入 2，按 Esc 退出。',
+    target: { row: 14, col: 14 },
+    validate: (snap, mode) => snap.code.includes('swap(arr[i 2]') && mode === 'normal',
   },
 
   // ── L13: Delete Line ─────────────────────────────────────────────────────
   {
-    id: 13, minSteps: 2,
-    keys: 'd  d',
+    id: 13, minSteps: 3,
+    keys: 'j  d  d',
     commands: [
       { key: 'dd', desc: '删除整行', category: '行操作' },
     ],
     instruction:
-      '双击操作符：当操作符连续按两次（dd），它将直接作用于当前整行。\n' +
-      '目标：光标在第 32 行 cout << endl;，连按两次 d 直接删掉这行打印。',
-    initialCursor: { row: 31, col: 4 },
-    validate: (snap, mode) => !snap.code.includes('cout << endl;') && mode === 'normal',
+      '删除整行：\n' +
+      '按 j 移到下一行 (return i + 1;)，连按两次 d 删掉这行代码！',
+    validate: (snap, mode) => !snap.code.includes('return i + 1;') && mode === 'normal',
   },
 
   // ── L14: Copy & Paste ────────────────────────────────────────────────────
@@ -415,13 +410,9 @@ const LEVELS: LevelSchema[] = [
       { key: 'p',  desc: '在下方粘贴', category: '行操作' },
     ],
     instruction:
-      '代码克隆术：y 是复制 (Yank)，p 是在光标后粘贴 (Put)。\n' +
-      '目标：光标在第 39 行 printArray 上，按 yy 复制，按 p 在下方粘贴出额外的一行。',
-    initialCursor: { row: 38, col: 4 },
-    validate: (snap, mode) => {
-      const matches = snap.code.match(/printArray\(arr, n\);/g);
-      return matches !== null && matches.length >= 3 && mode === 'normal';
-    }
+      '复制与粘贴：\n' +
+      '刚才删了一行，现在光标落在了 } 上。按 yy 复制当前行，按 p 在下方粘贴，完美收官！',
+    validate: (snap, mode) => snap.lineCount === INITIAL_CODE.split('\n').length && mode === 'normal',
   }
 ];
 

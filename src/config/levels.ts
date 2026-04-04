@@ -1088,19 +1088,23 @@ export const VIM_LEVELS: LevelConfig[] = [
 
   // ── L11: Delete Word ─────────────────────────────────────────────────────
   {
-    id: 11, minSteps: 2,
+    id: 11,
+    minSteps: 2,
     title: 'Delete Word',
     keys: 'd  w',
     commands: [
-      { key: 'd', desc: '删除操作符', category: '组合操作' },
-      { key: 'w', desc: '按词跳转',   category: '组合操作' },
+      { key: 'dw', desc: '删除单词 (Delete Word)', category: '删除' },
     ],
     taskDescription:
-      'Vim 的语法魔法：操作符 (Operator) + 动作 (Motion)。\n' +
-      '目标：d 是删除，w 是跳到下个词首。在 useless 的 u 上按 dw 删掉这个单词。',
-    initialCode: 'const ugly useless variable = 1;',
-    initialCursor: { row: 0, col: 11 },
-    validate: (snap, mode) => snap.code === 'const ugly variable = 1;' && mode === 'normal',
+      '删除操作符 `d` 必须配合动作命令使用。\n' +
+      '目标：使用 dw 删除多余的变量名 "secret_key"。',
+    targetWaypoint: { row: 0, col: 4 },
+    initialCode: 'let secret_key = "12345";',
+    initialCursor: { row: 0, col: 4 },
+    validate: (snap, mode) =>
+      !snap.code.includes('secret_key') &&
+      snap.code.includes('let') &&
+      mode === 'normal',
   },
 
   // ── L12: Change Word ─────────────────────────────────────────────────────
