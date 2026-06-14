@@ -3,17 +3,17 @@
 ## ⚡ 快速开始（30秒）
 
 ```bash
-cd /Users/lijingxuan/vim-hero
+cd /Users/lijingxuan/MyProject/vim-hero
 npm run dev
-# 打开: http://localhost:5176/
+# 打开终端里 Vite 打印的 localhost 地址
 ```
 
-## 📋 当前应用状态（2024）
+## 📋 当前应用状态（2026）
 
 **✅ 完全可运行的生产应用**
 
 - ✅ **Build**: 成功 (129ms, 0 errors)
-- ✅ **Dev Server**: 运行中 @ localhost:5176
+- ✅ **Dev Server**: 通过 `npm run dev` 启动，端口以 Vite 终端输出为准
 - ✅ **Vim引擎**: @replit/codemirror-vim v6.3.0 已激活
 - ✅ **主题**: VS Code深色主题(@uiw/codemirror-theme-vscode)
 - ✅ **热重载**: HMR已启用
@@ -50,7 +50,7 @@ npm run lint
 
 ## 🌐 访问地址
 
-- **开发**: http://localhost:5176/
+- **开发**: 运行 `npm run dev` 后查看终端输出的 localhost 地址
 - **生产**: ./dist/index.html
 
 ## 📦 技术栈
@@ -156,7 +156,7 @@ npm run preview
 
 ---
 
-最后更新: 2024  
+最后更新: 2026  
 状态: ✅ 生产就绪
 - 逐字符渲染，处理中英文混合等宽问题困难
 - 无法支持复杂 Vim 命令（d2w, ci" 等）

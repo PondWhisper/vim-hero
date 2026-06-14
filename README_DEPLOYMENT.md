@@ -64,7 +64,7 @@
 ```bash
 npm install
 npm run dev
-# 访问: http://localhost:5176/
+# 访问终端里 Vite 打印的 localhost 地址
 ```
 
 ### 生产构建
@@ -244,4 +244,4 @@ MIT License - 自由使用和修改
 
 Created with ❤️ by GitHub Copilot Agent
 
-**最后更新**: 2024年 | 构建状态: ✅ 全部通过
+**最后更新**: 2026年 | 构建状态: ✅ 全部通过

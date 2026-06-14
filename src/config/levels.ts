@@ -25,7 +25,8 @@ export interface LevelConfig {
 
   // ── Content ──────────────────────────────────────────────────────────────
   initialCode:     string;        // editor content when this level starts (required)
-  instruction:     string;        // player-facing instructions
+  instruction?:    string;        // player-facing instructions
+  taskDescription?: string;       // older configs used this name
   targetCode?:     string;        // if set, used for automatic win detection
 
   // ── Cursor placement ──────────────────────────────────────────────────────
@@ -35,12 +36,14 @@ export interface LevelConfig {
   // ── Ghost cursor / waypoints ──────────────────────────────────────────────
   target?:          { row: number; col: number };
   targets?:         { row: number; col: number }[];
+  targetWaypoint?:  { row: number; col: number };
   targetAction?:    TargetAction;
   semanticTarget?:  SemanticWaypoint;
   semanticTargets?: SemanticWaypoint[];
 
   // ── Metadata ──────────────────────────────────────────────────────────────
   optimalSteps?:   number;        // theoretical minimum keystrokes (used for entropy HUD)
+  minSteps?:       number;        // newer configs use this alias
   videoUrl?:       string;        // path/URL to optimal-solution demo video
   arrowGuard?:     boolean;       // if true, physical arrow keys flash red border and are blocked
   /**
@@ -55,18 +58,14 @@ export interface LevelConfig {
   validate?: (
     snap: EditorSnapshot,
     mode: VimMode,
-    ctx:  { current: Record<string, unknown> }
+    ctx:  { current: Record<string, any> }
   ) => boolean;
   onKeyDown?: (
     e:         KeyboardEvent,
-    ctx:       { current: Record<string, unknown> },
+    ctx:       { current: Record<string, any> },
     showToast: (msg: string) => void
   ) => void;
 }
-
-// ─── Placeholder Levels ───────────────────────────────────────────────────────
-// These are minimal scaffold levels to verify engine wiring.
-// Replace with real level designs when ready.
 
 // ─── Shared C++ QuickSort buffer (L4–L7 in the old system, kept for migration) ─
 // idx 0:  #include <iostream>
@@ -848,7 +847,7 @@ export const VIM_LEVELS: LevelConfig[] = [
       '① 按 i 进入 Insert 模式（光标变细线）\n' +
       '② 按 Esc 返回 Normal 模式（光标变方块）\n' +
       '完成一次完美的模式切换即可通关！',
-    validate: (snap, mode, ctx) => {
+    validate: (_snap, mode, ctx) => {
       return ctx.current.seenInsertToNormal === true && mode === 'normal';
     },
   },
@@ -1034,7 +1033,7 @@ export const VIM_LEVELS: LevelConfig[] = [
     initialCode: '    const isComplete = false;',
     initialCursor: { row: 0, col: 10 },
     target: { row: 0, col: 0 },
-    validate: (snap, mode, ctx) => ctx.current.step === 3 && mode === 'normal',
+    validate: (_snap, mode, ctx) => ctx.current.step === 3 && mode === 'normal',
     onKeyDown(e, ctx) {
       if (e.key === '^') ctx.current.step = 1;
       if (e.key === '$') ctx.current.step = 2;
